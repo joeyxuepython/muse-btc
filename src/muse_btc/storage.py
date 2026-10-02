@@ -3,7 +3,7 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +52,12 @@ class Store:
                 CREATE TABLE IF NOT EXISTS provider_status (
                     name TEXT PRIMARY KEY, payload TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS derivatives_oi (
+                    asset_id TEXT NOT NULL, ts TEXT NOT NULL, oi_usd REAL NOT NULL,
+                    PRIMARY KEY (asset_id, ts)
+                );
+                CREATE INDEX IF NOT EXISTS derivatives_oi_asset_time
+                    ON derivatives_oi(asset_id, ts);
                 CREATE TABLE IF NOT EXISTS regimes (
                     as_of TEXT PRIMARY KEY, payload TEXT NOT NULL
                 );
@@ -244,6 +250,30 @@ class Store:
         with self.connect() as db:
             rows = db.execute("SELECT payload FROM outcomes").fetchall()
         return [Outcome.model_validate_json(row[0]) for row in rows]
+
+    def save_oi(self, asset_id: str, at: datetime, oi_usd: float) -> None:
+        """累积衍生品持仓量读数（OKX 无公开 OI 历史接口，本地攒出 5 分钟变化）。"""
+        with self.connect() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO derivatives_oi VALUES (?,?,?)",
+                (asset_id, stamp(at), oi_usd),
+            )
+            db.execute(
+                "DELETE FROM derivatives_oi WHERE ts < ?",
+                (stamp(at - timedelta(hours=6)),),
+            )
+
+    def oi_history(self, asset_id: str, since: datetime) -> list[tuple[datetime, float]]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT ts, oi_usd FROM derivatives_oi WHERE asset_id=? AND ts>=? ORDER BY ts",
+                (asset_id, stamp(since)),
+            ).fetchall()
+        return [(datetime.fromisoformat(row[0]), row[1]) for row in rows]
+
+    def delete_status(self, name: str) -> None:
+        with self.connect() as db:
+            db.execute("DELETE FROM provider_status WHERE name=?", (name,))
 
     def save_status(self, status: ProviderStatus) -> None:
         with self.connect() as db:

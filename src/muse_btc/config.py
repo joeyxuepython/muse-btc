@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     api_token: SecretStr | None = None
     binance_spot_url: str = "https://data-api.binance.vision"
     binance_futures_url: str = "https://fapi.binance.com"
+    # 可选：仅 Binance 相关域名走的代理（如新加坡节点），形如 http://user:pass@host:port；
+    # 不设置则全部请求走默认出口。DEX Screener / GoPlus 等始终走默认出口。
+    binance_proxy: SecretStr | None = None
+    okx_url: str = "https://www.okx.com"
+    # 衍生品数据源：okx（默认，公开接口无地区限制）、binance、auto（先 Binance，失败回退 OKX）
+    futures_source: str = Field(default="okx", pattern=r"^(okx|binance|auto)$")
     dexscreener_url: str = "https://api.dexscreener.com"
     goplus_url: str = "https://api.gopluslabs.io"
     fee_bps_each_way: float = Field(default=10, ge=0)

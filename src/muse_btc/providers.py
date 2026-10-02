@@ -2,7 +2,8 @@ import asyncio
 import json
 import os
 import ssl
-from datetime import UTC, datetime
+import statistics
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -147,6 +148,13 @@ def token_risk(data: dict | None, chain: str) -> TokenRisk:
     )
 
 
+def okx_inst_id(symbol: str) -> str | None:
+    """Binance 现货符号映射到 OKX 永续合约，如 BTCUSDT -> BTC-USDT-SWAP。"""
+    if not symbol.endswith("USDT") or len(symbol) <= 4 or not symbol[:-4].isalnum():
+        return None
+    return f"{symbol[:-4]}-USDT-SWAP"
+
+
 class Providers:
     def __init__(
         self, settings: Settings, store: Store, transport: httpx.AsyncBaseTransport | None = None
@@ -158,6 +166,7 @@ class Providers:
             timeout=settings.request_timeout_seconds,
             verify=context,
             transport=transport,
+            mounts=self._proxy_mounts(settings, context),
             follow_redirects=False,
         )
         self.semaphore = asyncio.Semaphore(4)
@@ -166,6 +175,26 @@ class Providers:
         self.universe_symbols: list[str] = []
         self.universe_raw_id: str | None = None
         self.futures_errors: set[str] = set()
+        self.futures_source_used: set[str] = set()
+
+    @staticmethod
+    def _proxy_mounts(
+        settings: Settings, context: ssl.SSLContext
+    ) -> dict[str, httpx.AsyncBaseTransport] | None:
+        """Binance 域名走独立代理（如新加坡节点），其余域名保持默认出口。
+
+        httpx 会把这里的 mounts 合并到环境代理的默认路由表之上，
+        因此未命中的域名不受影响。代理地址以 SecretStr 保存，不进入日志。
+        """
+        raw = settings.binance_proxy.get_secret_value().strip() if settings.binance_proxy else ""
+        if not raw:
+            return None
+        mounts: dict[str, httpx.AsyncBaseTransport] = {}
+        for base in {settings.binance_spot_url, settings.binance_futures_url}:
+            host = httpx.URL(base).host
+            if host:
+                mounts[f"https://{host}"] = httpx.AsyncHTTPTransport(proxy=raw, verify=context)
+        return mounts or None
 
     async def close(self) -> None:
         await self.client.aclose()
@@ -174,6 +203,14 @@ class Providers:
         self.store.save_status(
             ProviderStatus(name=name, state=state, message=message, coverage=coverage)
         )
+
+    def futures_label(self) -> str:
+        """本轮实际提供衍生品数据的来源，如 'OKX Futures'；无数据时用配置名。"""
+        used = sorted(self.futures_source_used)
+        if not used:
+            fallback = {"binance": "Binance", "okx": "OKX", "auto": "Binance/OKX"}
+            used = [fallback.get(self.settings.futures_source, "OKX")]
+        return " + ".join(f"{name} Futures" for name in used)
 
     async def get(
         self, source: str, base: str, path: str, params: dict | None = None
@@ -213,6 +250,7 @@ class Providers:
     async def binance(self) -> list[Snapshot]:
         try:
             self.futures_errors.clear()
+            self.futures_source_used.clear()
             refresh = (
                 not self.exchange_cache
                 or not self.universe_symbols
@@ -313,8 +351,13 @@ class Providers:
                 if row.features.funding_rate_pct is not None
                 and row.features.oi_change_5m_pct is not None
             ]
+            okx_used = "OKX" in self.futures_source_used
+            label = self.futures_label()
+            for stale in ("Binance Futures", "OKX Futures"):
+                if stale != label and stale not in label:
+                    self.store.delete_status(stale)
             self.status(
-                "Binance Futures",
+                label,
                 ProviderState.READY
                 if len(with_futures) == len(snapshots) and snapshots
                 else ProviderState.DEGRADED
@@ -322,7 +365,9 @@ class Providers:
                 else ProviderState.UNAVAILABLE,
                 f"完整衍生品特征 {len(with_futures)}/{len(snapshots)} 个标的"
                 + ("；" + "; ".join(sorted(self.futures_errors)) if self.futures_errors else ""),
-                "Funding、Basis、OI 5m、合约主动成交；未提供完整清算历史",
+                "Funding、跨所 Basis、OI 5m（本地累积）；无合约主动成交与完整清算历史"
+                if okx_used
+                else "Funding、Basis、OI 5m、合约主动成交；未提供完整清算历史",
             )
             return snapshots
         except (ProviderError, ValueError, KeyError, TypeError) as exc:
@@ -331,10 +376,10 @@ class Providers:
                 "Binance Spot", ProviderState.UNAVAILABLE, message, "BTC 与 USDT 山寨币现货"
             )
             self.status(
-                "Binance Futures",
+                self.futures_label(),
                 ProviderState.UNAVAILABLE,
                 "现货采集未完成，本轮未形成联动特征",
-                "USD-M 合约",
+                "USD-M 合约" if "OKX" not in self.futures_source_used else "USDT 永续合约",
             )
             return []
 
@@ -357,6 +402,67 @@ class Providers:
         candles = candles_from_binance(rows)
         features, issues = candle_features(candles, spot_received_at)
         depth_features(book, features)
+        at = await self._collect_derivatives(
+            symbol, float(ticker["lastPrice"]), features, issues, raw_ids, at
+        )
+        closed = [c for c in candles if c.close_time <= spot_received_at]
+        if not closed:
+            raise ProviderError("没有可用的已收盘 K 线")
+        market_time = milliseconds(int(ticker["closeTime"]))
+        return Snapshot(
+            asset_id=f"binance:{symbol}",
+            symbol=symbol,
+            module=Module.BTC if symbol == "BTCUSDT" else Module.ALT,
+            source="Binance",
+            market_time=market_time,
+            available_at=at,
+            price=float(ticker["lastPrice"]),
+            quote_volume_24h=float(ticker["quoteVolume"]),
+            features=features,
+            raw_ids=raw_ids,
+            quality_issues=issues,
+            candles=closed,
+        )
+
+    def _futures_sources(self) -> list[str]:
+        mode = self.settings.futures_source
+        if mode == "binance":
+            return ["binance"]
+        if mode == "okx":
+            return ["okx"]
+        return ["binance", "okx"]
+
+    async def _collect_derivatives(
+        self,
+        symbol: str,
+        spot_price: float,
+        features: Features,
+        issues: list[str],
+        raw_ids: list[str],
+        at: datetime,
+    ) -> datetime:
+        """按配置选择衍生品数据源；auto 模式下 Binance 失败自动回退 OKX。"""
+        for name in self._futures_sources():
+            if name == "binance":
+                at, ok = await self._binance_derivatives(symbol, features, issues, raw_ids, at)
+            else:
+                at, ok = await self._okx_derivatives(
+                    symbol, spot_price, features, issues, raw_ids, at
+                )
+            if ok:
+                self.futures_source_used.add("Binance" if name == "binance" else "OKX")
+                return at
+        issues.append("DERIVATIVES_UNAVAILABLE")
+        return at
+
+    async def _binance_derivatives(
+        self,
+        symbol: str,
+        features: Features,
+        issues: list[str],
+        raw_ids: list[str],
+        at: datetime,
+    ) -> tuple[datetime, bool]:
         try:
             futures_base = self.settings.binance_futures_url
             results = await asyncio.gather(
@@ -402,27 +508,79 @@ class Providers:
                     derivatives_features(mark, oi, perp_closed, features, at)
             else:
                 self.futures_errors.update(str(v) for v in results if isinstance(v, ProviderError))
-                issues.append("DERIVATIVES_UNAVAILABLE")
         except (ProviderError, KeyError, TypeError, ValueError):
-            issues.append("DERIVATIVES_UNAVAILABLE")
-        closed = [c for c in candles if c.close_time <= spot_received_at]
-        if not closed:
-            raise ProviderError("没有可用的已收盘 K 线")
-        market_time = milliseconds(int(ticker["closeTime"]))
-        return Snapshot(
-            asset_id=f"binance:{symbol}",
-            symbol=symbol,
-            module=Module.BTC if symbol == "BTCUSDT" else Module.ALT,
-            source="Binance",
-            market_time=market_time,
-            available_at=at,
-            price=float(ticker["lastPrice"]),
-            quote_volume_24h=float(ticker["quoteVolume"]),
-            features=features,
-            raw_ids=raw_ids,
-            quality_issues=issues,
-            candles=closed,
-        )
+            pass
+        ok = features.funding_rate_pct is not None and features.oi_change_5m_pct is not None
+        return at, ok
+
+    async def _okx_derivatives(
+        self,
+        symbol: str,
+        spot_price: float,
+        features: Features,
+        issues: list[str],
+        raw_ids: list[str],
+        at: datetime,
+    ) -> tuple[datetime, bool]:
+        """OKX 公开接口：funding-rate、open-interest（当前值）、ticker。
+
+        OKX 没有公开的 OI 历史接口，持仓量变化靠本地累积读数计算；
+        公开 K 线不含主动成交量，合约 taker 特征留空。
+        """
+        try:
+            inst = okx_inst_id(symbol)
+            if not inst:
+                return at, False
+            base = self.settings.okx_url
+            results = await asyncio.gather(
+                self.get("OKX Futures", base, "/api/v5/public/funding-rate", {"instId": inst}),
+                self.get("OKX Futures", base, "/api/v5/public/open-interest", {"instId": inst}),
+                self.get("OKX Futures", base, "/api/v5/market/ticker", {"instId": inst}),
+                return_exceptions=True,
+            )
+            for value in results:
+                if isinstance(value, tuple):
+                    raw_ids.append(value[1])
+                    at = max(at, value[2])
+            if not all(isinstance(value, tuple) for value in results):
+                self.futures_errors.update(str(v) for v in results if isinstance(v, ProviderError))
+                return at, False
+            funding, oi_resp, ticker = (value[0] for value in results)
+            for payload in (funding, oi_resp, ticker):
+                if (
+                    not isinstance(payload, dict)
+                    or payload.get("code") != "0"
+                    or not payload.get("data")
+                ):
+                    raise ProviderError("OKX 返回数据结构不符合预期")
+            rate = number(funding["data"][0].get("fundingRate"))
+            if rate is not None:
+                features.funding_rate_pct = rate * 100
+            swap_last = number(ticker["data"][0].get("last"))
+            if swap_last and spot_price > 0:
+                # 跨所基差：OKX 永续最新价相对 Binance 现货价，仅作方向参考。
+                features.basis_pct = (swap_last / spot_price - 1) * 100
+                issues.append("BASIS_CROSS_EXCHANGE")
+            oi_usd = number(oi_resp["data"][0].get("oiUsd"))
+            if oi_usd is not None and oi_usd > 0:
+                key = f"okx:{inst}"
+                self.store.save_oi(key, at, oi_usd)
+                history = self.store.oi_history(key, at - timedelta(minutes=65))
+                target = at - timedelta(minutes=5)
+                past = [p for p in history if p[0] <= at - timedelta(minutes=2, seconds=30)]
+                if past:
+                    ref_ts, ref_oi = min(past, key=lambda p: abs((p[0] - target).total_seconds()))
+                    if abs((ref_ts - target).total_seconds()) <= 150 and ref_oi > 0:
+                        features.oi_change_5m_pct = (oi_usd / ref_oi - 1) * 100
+                if len(history) >= 20:
+                    values = [p[1] for p in history]
+                    deviation = statistics.pstdev(values[:-1])
+                    if deviation > 0:
+                        features.oi_zscore = (values[-1] - statistics.mean(values[:-1])) / deviation
+        except (ProviderError, KeyError, TypeError, ValueError, IndexError):
+            pass
+        ok = features.funding_rate_pct is not None and features.oi_change_5m_pct is not None
+        return at, ok
 
     async def memes(self) -> list[Snapshot]:
         try:

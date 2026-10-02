@@ -78,6 +78,15 @@ def public_api_fixture(request: httpx.Request) -> httpx.Response:
             {"timestamp": stamp - 300000, "sumOpenInterest": "100"},
             {"timestamp": stamp, "sumOpenInterest": "101"},
         ]
+    elif path.endswith("/public/funding-rate"):
+        inst = request.url.params.get("instId", "")
+        data = {"code": "0", "msg": "", "data": [{"instId": inst, "fundingRate": "0.0001"}]}
+    elif path.endswith("/public/open-interest"):
+        inst = request.url.params.get("instId", "")
+        data = {"code": "0", "msg": "", "data": [{"instId": inst, "oiUsd": "101"}]}
+    elif path.endswith("/market/ticker"):
+        inst = request.url.params.get("instId", "")
+        data = {"code": "0", "msg": "", "data": [{"instId": inst, "last": "121.36"}]}
     elif path == "/token-profiles/latest/v1":
         data = [{"chainId": "ethereum", "tokenAddress": address}]
     elif "/token-pairs/v1/" in path:
@@ -105,6 +114,10 @@ def public_api_fixture(request: httpx.Request) -> httpx.Response:
 async def test_public_adapters_normalize_all_three_modules_and_keep_lineage(settings, store):
     providers = Providers(settings, store, transport=httpx.MockTransport(public_api_fixture))
     try:
+        # OKX 无公开 OI 历史接口，持仓量变化依赖本地累积：预置 5 分钟前的读数。
+        seed_at = utc_now() - timedelta(minutes=5)
+        for base in ("BTC", "ETH", "SOL"):
+            store.save_oi(f"okx:{base}-USDT-SWAP", seed_at, 100.0)
         cex = await providers.binance()
         memes = await providers.memes()
         assert len(cex) == 3
@@ -112,6 +125,11 @@ async def test_public_adapters_normalize_all_three_modules_and_keep_lineage(sett
         assert not any(s.symbol == "USDCUSDT" for s in cex)
         assert cex[0].features.funding_rate_pct == pytest.approx(0.01)
         assert cex[0].features.oi_change_5m_pct == pytest.approx(1)
+        assert cex[0].features.basis_pct == pytest.approx(0)
+        assert "BASIS_CROSS_EXCHANGE" in cex[0].quality_issues
+        assert "OKX" in providers.futures_source_used
+        statuses = {s.name: s.state for s in store.statuses()}
+        assert statuses["OKX Futures"] == "READY"
         assert memes[0].risk.status == "BLOCKED"
         assert memes[0].features.relative_volume == pytest.approx(5.5)
         for snap in cex + memes:
@@ -125,6 +143,8 @@ async def test_public_adapters_normalize_all_three_modules_and_keep_lineage(sett
 
 @pytest.mark.asyncio
 async def test_missing_futures_does_not_destroy_spot_monitoring(settings, store):
+    settings.futures_source = "binance"
+
     def handler(request):
         if request.url.host == "fapi.binance.com":
             return httpx.Response(451)

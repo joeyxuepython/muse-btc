@@ -83,7 +83,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
         btc = next((s for s in snapshots if s.asset_id == "binance:BTCUSDT"), None)
         if not available or not btc or not usable(btc, now, config):
             return JSONResponse({"status": "degraded", "market_data_ready": False}, status_code=503)
-        derivatives = statuses.get("Binance Futures")
+        derivatives = statuses.get("OKX Futures") or statuses.get("Binance Futures")
         return {
             "status": "ready",
             "market_data_ready": True,
