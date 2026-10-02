@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>MUSE · 加密市场研判</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <script defer src="/static/app.js"></script>
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Muse 首页"
+        ><span class="brand-mark">m</span
+        ><span>MUSE<small>MARKET INTELLIGENCE</small></span></a
+      >
+      <div class="nav-label">工作空间</div>
+      <nav aria-label="监控模块">
+        <button class="nav-item active" data-view="ALL">
+          <span>◈</span>市场总览
+        </button>
+        <button class="nav-item" data-view="BTC">
+          <span>₿</span>BTC 研判<span class="nav-dot"></span>
+        </button>
+        <button class="nav-item" data-view="ALT">
+          <span>↗</span>山寨币雷达
+        </button>
+        <button class="nav-item" data-view="MEME">
+          <span>◎</span>Meme 发现
+        </button>
+        <button class="nav-item" data-view="SIGNALS">
+          <span>⌁</span>提醒记录
+        </button>
+        <button class="nav-item" data-view="VALIDATION">
+          <span>▥</span>历史验证
+        </button>
+      </nav>
+      <div class="sidebar-note">
+        <span class="pulse-dot"></span>证据优先 · 风险先行
+        <p>每次提醒，都保留当时的依据。</p>
+      </div>
+      <div class="sidebar-bottom">
+        <span class="avatar">M</span>
+        <div>研究工作台<small>V0.1 · 规则观察期</small></div>
+      </div>
+    </aside>
+    <main>
+      <header>
+        <div class="breadcrumb">
+          工作空间 <span>/</span> <span id="breadcrumb-view">市场总览</span>
+        </div>
+        <select id="mobile-view" aria-label="切换监控页面">
+          <option value="ALL">市场总览</option>
+          <option value="BTC">BTC 研判</option>
+          <option value="ALT">山寨币雷达</option>
+          <option value="MEME">Meme 发现</option>
+          <option value="SIGNALS">提醒记录</option>
+          <option value="VALIDATION">历史验证</option>
+        </select>
+        <div class="header-right">
+          <span id="connection" class="connection">连接中</span
+          ><span id="clock">—</span>
+        </div>
+      </header>
+      <div class="workspace">
+        <section class="page-heading">
+          <div>
+            <div class="eyebrow">OBSERVE. UNDERSTAND. ACT.</div>
+            <h1 id="page-title">市场总览<span class="heading-dot">.</span></h1>
+            <p id="page-subtitle">在价格变化之前，寻找值得关注的证据。</p>
+          </div>
+          <div class="actions">
+            <button id="export" class="button secondary">↓ 导出记录</button
+            ><button id="refresh" class="button primary">↻ 立即采集</button>
+          </div>
+        </section>
+        <div id="notice" class="notice" role="status" hidden></div>
+        <section class="metrics" aria-label="监控概况">
+          <article class="metric">
+            <div class="metric-label">BTC 风险背景<span>◈</span></div>
+            <div id="risk-mode" class="metric-value">未知</div>
+            <div id="risk-caption" class="metric-caption">等待真实市场数据</div>
+          </article>
+          <article class="metric">
+            <div class="metric-label">山寨币观察<span>↗</span></div>
+            <div class="metric-value">
+              <span id="alt-count">0</span><small>个标的</small>
+            </div>
+            <div class="metric-caption">按公开现货成交量筛选</div>
+          </article>
+          <article class="metric">
+            <div class="metric-label">Meme 候选<span>◎</span></div>
+            <div class="metric-value">
+              <span id="meme-count">0</span><small>个池子</small>
+            </div>
+            <div class="metric-caption">DEX 发现与合约风险核查</div>
+          </article>
+          <article class="metric">
+            <div class="metric-label">有效提醒<span>⌁</span></div>
+            <div class="metric-value">
+              <span id="signal-count">0</span><small>条</small>
+            </div>
+            <div id="signal-caption" class="metric-caption">
+              观察、入场候选与退出风险
+            </div>
+          </article>
+        </section>
+        <div class="observation-banner">
+          <span class="badge observation">规则观察期</span
+          ><span
+            >当前提醒用于前瞻验证；证据评分表示规则满足程度，尚未校准为成功概率。</span
+          >
+        </div>
+        <section id="monitor-view" class="panel market-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>市场监控</h2>
+              <span id="universe-caption">BTC · 山寨币 · Meme</span>
+            </div>
+            <div class="table-controls">
+              <div class="tabs" role="group" aria-label="标的筛选">
+                <button class="selected" data-filter="ALL">全部</button
+                ><button data-filter="BTC">BTC</button
+                ><button data-filter="ALT">山寨币</button
+                ><button data-filter="MEME">Meme</button>
+              </div>
+              <label class="search"
+                ><span>⌕</span
+                ><input
+                  id="search"
+                  placeholder="搜索币种或地址"
+                  aria-label="搜索币种或地址"
+              /></label>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>标的 / 来源</th>
+                  <th>价格</th>
+                  <th>5m 变化</th>
+                  <th>相对成交量</th>
+                  <th>主动买入</th>
+                  <th>Funding</th>
+                  <th>趋势 / 活跃度</th>
+                  <th>数据 / 风险</th>
+                </tr>
+              </thead>
+              <tbody id="assets"></tbody>
+            </table>
+          </div>
+          <div id="empty-assets" class="empty">
+            <div class="empty-icon">⌁</div>
+            <h3>等待第一轮真实观察</h3>
+            <p>
+              采集成功后，标的和指标会出现在这里。<br />数据源受限或尚未启用时，请查看下方状态。
+            </p>
+            <a href="#sources">查看数据源 ↗</a>
+          </div>
+          <div class="panel-footer">
+            <span id="asset-footer">0 个标的</span
+            ><span>点击标的查看指标、时间与原始依据 ↗</span>
+          </div>
+        </section>
+        <div id="research-grid" class="research-grid">
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <h2>最新提醒</h2>
+                <span>触发条件与失效依据</span>
+              </div>
+              <button id="notify" class="text-button">开启浏览器提醒</button>
+            </div>
+            <div id="signals" class="signal-list"></div>
+            <div id="empty-signals" class="empty compact">
+              <div class="empty-icon">◇</div>
+              <h3>暂无提醒</h3>
+              <p>仅在规则满足时记录提醒；数据缺失不会生成机会信号。</p>
+            </div>
+          </section>
+          <section class="panel regime-panel">
+            <div class="panel-heading">
+              <div>
+                <h2>BTC 风险联动</h2>
+                <span>影响山寨币与 Meme 的入场条件</span>
+              </div>
+              <span class="tiny-label">BTC → ALT / MEME</span>
+            </div>
+            <div class="regime-body">
+              <div class="regime-line">
+                <span>BTC 技术结构</span
+                ><strong id="btc-structure">未知</strong>
+              </div>
+              <div class="regime-line">
+                <span>资金轮动</span><strong>尚未验证</strong>
+              </div>
+              <div class="regime-line">
+                <span>宏观与资金流</span><strong>尚未接入</strong>
+              </div>
+              <div class="divider"></div>
+              <div class="mini-label">当前依据</div>
+              <ul id="regime-evidence" class="evidence-list">
+                <li>等待 BTC 数据</li>
+              </ul>
+              <p class="scope-note">
+                当前风险判断覆盖 Binance BTC，尚不代表完整的全球市场状态。
+              </p>
+            </div>
+          </section>
+        </div>
+        <section id="validation-view" class="panel" hidden>
+          <div class="panel-heading">
+            <div>
+              <h2>前瞻验证</h2>
+              <span>提醒发出后，记录真实归档价格的变化</span>
+            </div>
+            <span class="badge observation">观察样本</span>
+          </div>
+          <div id="validation-body" class="validation-body"></div>
+        </section>
+        <section id="sources" class="panel source-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>数据源与覆盖范围</h2>
+              <span>未接入、受限与过期数据均单独标记</span>
+            </div>
+            <span id="cycle-status" class="tiny-label">等待采集</span>
+          </div>
+          <div id="providers" class="provider-grid"></div>
+        </section>
+        <footer>
+          <span>MUSE / CRYPTO INTELLIGENCE</span
+          ><span id="last-updated">尚无采集记录</span
+          ><span>时间显示：UTC+8</span>
+        </footer>
+      </div>
+    </main>
+    <dialog id="detail">
+      <div class="dialog-heading">
+        <h2 id="detail-title">详情</h2>
+        <button id="close-detail" aria-label="关闭详情">×</button>
+      </div>
+      <div id="detail-body"></div>
+    </dialog>
+    <dialog id="login">
+      <form id="login-form">
+        <h2>工作台访问口令</h2>
+        <p>此实例启用了访问保护。</p>
+        <input
+          id="token"
+          type="password"
+          autocomplete="current-password"
+          placeholder="访问口令"
+          required
+        /><button class="button primary" type="submit">进入工作台</button>
+      </form>
+    </dialog>
+  </body>
+</html>
