@@ -1,0 +1,7 @@
+# Signals and Web Alert Center
+
+Levels: INFO, WATCH, SETUP, STRONG, CRITICAL_RISK. STRONG requires at least three independent evidence groups, current aligned inputs and an acceptable BTC risk background. New rules remain OBSERVATION_ONLY; STRONG does not mean historically validated. Incomplete data caps opportunity evidence at WATCH. Existing legacy signals are preserved and viewable.
+
+An active asset+rule alert has first_seen, last_updated, escalated_at, max_score, resolved_at and event history. Level/score/evidence changes update the event and record a lifecycle transition; unchanged evidence refreshes the current view without resetting read state or creating a notification; numeric jitter is deduplicated and significant score changes are measured from the last notification. Expired/resolved signals open a new event when new evidence arrives. Read/unread and pinned are durable user state; stale evidence pauses use but does not imply price invalidation. Supporting/contradictory evidence, source times, raw IDs, score delta and invalidation remain inspectable.
+
+Web feed supports level/state/asset text search, unread and pinned filters, mark read/pin/resolve and alert badge. Optional audio starts only from a user gesture; browser notifications are limited to STRONG and CRITICAL_RISK, with a disable control. Telegram has no runtime path. Browser polling/live feed runs only while the page is open; no background mobile delivery claim.

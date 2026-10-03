@@ -14,11 +14,12 @@ def new_id() -> str:
 
 
 class Record(BaseModel):
-    model_config = ConfigDict(allow_inf_nan=False)
+    model_config = ConfigDict(allow_inf_nan=False, validate_assignment=True)
 
 
 class Module(StrEnum):
     BTC = "BTC"
+    ETH = "ETH"
     ALT = "ALT"
     MEME = "MEME"
 
@@ -80,6 +81,30 @@ class Features(Record):
     buys_5m: int | None = None
     sells_5m: int | None = None
     pool_age_hours: float | None = None
+    relative_strength_eth_15m_pct: float | None = None
+    oi_contracts: float | None = None
+    oi_usd: float | None = None
+    oi_velocity_pct_per_minute: float | None = None
+    oi_acceleration_pct: float | None = None
+    oi_percentile: float | None = None
+    funding_mean_pct: float | None = None
+    funding_zscore: float | None = None
+    funding_percentile: float | None = None
+    funding_trend_pct: float | None = None
+    mark_price: float | None = None
+    index_price: float | None = None
+    cross_venue_premium_pct: float | None = None
+    perp_taker_delta_usd: float | None = None
+    long_short_account_ratio: float | None = None
+    elite_account_ratio: float | None = None
+    elite_position_ratio: float | None = None
+    spot_sample_cvd_usdt: float | None = None
+    perp_sample_cvd_usdt: float | None = None
+    perp_spread_bps: float | None = None
+    perp_bid_depth_1pct_usdt: float | None = None
+    perp_ask_depth_1pct_usdt: float | None = None
+    spot_perp_structure: str | None = None
+    deleveraging_signal: bool | None = None
 
 
 class TokenRisk(Record):
@@ -112,6 +137,11 @@ class Snapshot(Record):
     quality_issues: list[str] = []
     candles: list[Candle] = []
     detail_updated_at: AwareDatetime | None = None
+    canonical_asset_id: str | None = None
+    component_times: dict[str, AwareDatetime] = {}
+    component_received_at: dict[str, AwareDatetime] = {}
+    missing_metrics: list[str] = []
+    tier: str | None = None
     feature_version: str = "features-v1"
 
 
@@ -158,6 +188,9 @@ class Signal(Record):
     expires_at: AwareDatetime
     horizon_seconds: int
     parent_signal_id: str | None = None
+    feature_version: str = "features-v1"
+    signal_version: str = "signals-v1"
+    model_version: str = "rules-only"
 
 
 class SignalEvent(Record):
@@ -184,3 +217,5 @@ class Outcome(Record):
     round_trip_cost_bps: float
     sample_count: int
     max_observation_gap_seconds: float
+    time_to_mfe_seconds: float | None = None
+    time_to_mae_seconds: float | None = None

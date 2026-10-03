@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import datetime
 
+from .alerts import publish_alert
 from .config import Settings
 from .models import (
     Module,
@@ -16,6 +17,7 @@ from .models import (
     utc_now,
 )
 from .providers import Providers
+from .ranking import rank_assets
 from .rules import evaluate, market_regime, usable
 from .storage import Store
 from .validation import validate_pending
@@ -48,6 +50,9 @@ class Collector:
             self.providers.status(
                 name, ProviderState.DISABLED, "已停止新采集、分析和提醒；保留历史", "历史归档"
             )
+        self.providers.status(
+            "Binance Futures", ProviderState.DISABLED, "V4 合约统一使用 OKX；保留旧历史", "历史归档"
+        )
 
     async def start(self) -> None:
         self.initialise_statuses()
@@ -75,20 +80,45 @@ class Collector:
             try:
                 binance = await self.providers.binance()
                 now = utc_now()
+                eth = next((s for s in binance if s.module == Module.ETH), None)
                 btc = next((s for s in binance if s.module == Module.BTC), None)
                 saved = []
+
+                def aligned(snapshot, core):
+                    if (
+                        not core
+                        or not usable(snapshot, now, self.settings)
+                        or not usable(core, now, self.settings)
+                    ):
+                        return False
+                    source = snapshot.component_times.get("candles", snapshot.market_time)
+                    reference = core.component_times.get("candles", core.market_time)
+                    return (
+                        abs((source - reference).total_seconds())
+                        <= self.settings.time_alignment_seconds
+                    )
+
                 for snapshot in binance:
                     snapshot.decision_at = now
+                    snapshot.features.relative_strength_15m_pct = None
+                    snapshot.features.relative_strength_eth_15m_pct = None
                     if (
                         snapshot.module == Module.ALT
-                        and btc
-                        and usable(btc, now, self.settings)
-                        and abs((snapshot.market_time - btc.market_time).total_seconds()) <= 120
+                        and aligned(snapshot, btc)
                         and snapshot.features.return_15m_pct is not None
                         and btc.features.return_15m_pct is not None
                     ):
                         snapshot.features.relative_strength_15m_pct = (
                             snapshot.features.return_15m_pct - btc.features.return_15m_pct
+                        )
+                    if (
+                        snapshot.module == Module.ALT
+                        and aligned(snapshot, eth)
+                        and snapshot.features.return_15m_pct is not None
+                        and eth.features.return_15m_pct is not None
+                    ):
+                        snapshot.features.relative_strength_eth_15m_pct = (
+                            snapshot.features.return_15m_pct - eth.features.return_15m_pct
                         )
                     try:
                         self.store.save_snapshot(snapshot)
@@ -97,6 +127,8 @@ class Collector:
                         logger.warning("Rejected snapshot: future timestamp or invalid lineage")
                 regime = market_regime(btc if btc in saved else None, now, self.settings)
                 self.store.save_regime(regime)
+                ranking = rank_assets(saved, self.store.rankings(now), now, self.settings)
+                self.store.save_rankings(ranking, now)
                 signal_count = self._process_signals(saved, regime, now)
                 outcomes = validate_pending(self.store, now, self.settings)
                 self.last_finished_at = now
@@ -169,16 +201,37 @@ class Collector:
                         }
                     )
                     self.store.save_signal(invalidated)
+                    publish_alert(self.store, invalidated, None, now, self.settings)
                     count += 1
         for snapshot in snapshots:
             for signal in evaluate(snapshot, regime, now, self.settings):
+                rank = next(
+                    (r for r in self.store.rankings(now) if r["asset_id"] == snapshot.asset_id),
+                    None,
+                )
                 previous = self.store.last_signal_time(signal.asset_id, signal.rule_id, signal.kind)
                 if (
                     previous
                     and (now - previous).total_seconds() < self.settings.alert_cooldown_seconds
                 ):
+                    # Web lifecycle updates independently from legacy signal-row cooldown.
+                    existing = self.store.signal(signal.id)
+                    if not existing:
+                        active = next(
+                            (
+                                a
+                                for a in self.store.alerts()
+                                if a["asset_id"] == signal.asset_id
+                                and a["rule_id"] == signal.rule_id
+                            ),
+                            None,
+                        )
+                        if active:
+                            signal.id = active["signal_id"]
+                            publish_alert(self.store, signal, rank, now, self.settings)
                     continue
                 self.store.save_signal(signal)
+                publish_alert(self.store, signal, rank, now, self.settings)
                 count += 1
         return count
 

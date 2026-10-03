@@ -1,0 +1,16 @@
+# Explicit proxy and CA trust for the managed cloud Docker environment.
+services:
+  muse:
+    build:
+      secrets:
+        - proxy_ca
+    environment:
+      HTTP_PROXY: ${HTTP_PROXY}
+      HTTPS_PROXY: ${HTTPS_PROXY}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1}
+      SSL_CERT_FILE: /run/proxy-ca.pem
+    volumes:
+      - /etc/ssl/certs/ca-certificates.crt:/run/proxy-ca.pem:ro
+secrets:
+  proxy_ca:
+    file: /etc/ssl/certs/ca-certificates.crt

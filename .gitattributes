@@ -1,0 +1,2 @@
+# Archived sources retain original Markdown hard line breaks.
+docs/requirements/*.md whitespace=-blank-at-eol

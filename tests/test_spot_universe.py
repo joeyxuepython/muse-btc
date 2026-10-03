@@ -12,11 +12,11 @@ from muse_btc.service import Collector, signal_view
 
 
 @pytest.mark.asyncio
-async def test_100_quotes_rotation_meme_eligibility_and_detail_failure(settings, store):
-    settings.max_altcoins = 99
+async def test_102_quotes_rotation_meme_eligibility_and_detail_failure(settings, store):
+    settings.max_altcoins = 100
     settings.detail_batch_size = 20
     calls = []
-    symbols = ["BTCUSDT", "PEPEUSDT"] + [f"COIN{i}USDT" for i in range(104)]
+    symbols = ["BTCUSDT", "ETHUSDT", "PEPEUSDT"] + [f"COIN{i}USDT" for i in range(104)]
 
     def handler(request):
         calls.append(request)
@@ -63,9 +63,9 @@ async def test_100_quotes_rotation_meme_eligibility_and_detail_failure(settings,
     try:
         detailed = set()
         prices = []
-        for _ in range(5):
+        for _ in range(10):
             result = await providers.binance()
-            assert len(result) == 100
+            assert len(result) == 102
             assert result[0].symbol == "BTCUSDT"
             assert "PEPEUSDT" in {s.symbol for s in result}
             assert result[0].detail_updated_at is not None
@@ -84,11 +84,11 @@ async def test_100_quotes_rotation_meme_eligibility_and_detail_failure(settings,
                         )
                         == []
                     )
-        assert len(detailed) == 99  # All except the failed PEPE detail, quotes retained.
-        assert len(set(prices)) == 5
-        assert providers.coverage["quotes"] == providers.coverage["selected"] == 100
-        assert "PEPEUSDT" in providers.coverage["missing_details"]
-        assert sum(r.url.path.endswith("/depth") for r in calls) == 105
+        assert len(detailed) == 102  # All candles sampled; failed PEPE book stays missing.
+        assert len(set(prices)) == 10
+        assert providers.coverage["quotes"] == providers.coverage["selected"] == 102
+        assert any(s.symbol == "PEPEUSDT" and s.features.spread_bps is None for s in result)
+        assert sum(r.url.path.endswith("/depth") for r in calls) == 220
         assert not any("dexscreener" in r.url.host or "goplus" in r.url.host for r in calls)
     finally:
         await providers.close()

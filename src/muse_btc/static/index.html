@@ -22,6 +22,10 @@
         <button class="nav-item" data-view="BTC">
           <span>₿</span>BTC 研判<span class="nav-dot"></span>
         </button>
+        <button class="nav-item" data-view="ETH"><span>Ξ</span>ETH 核心</button>
+        <button class="nav-item" data-view="RANKING"><span>▦</span>100 币雷达</button>
+        <button class="nav-item" data-view="HEATMAP"><span>◫</span>机会热图</button>
+        <button class="nav-item" data-view="ALERTS"><span>!</span>Web 预警 <span id="alert-badge">0</span></button>
         <button class="nav-item" data-view="ALT">
           <span>↗</span>山寨币雷达
         </button>
@@ -52,6 +56,10 @@
         <select id="mobile-view" aria-label="切换监控页面">
           <option value="ALL">市场总览</option>
           <option value="BTC">BTC 研判</option>
+          <option value="ETH">ETH 核心</option>
+          <option value="RANKING">100 币雷达</option>
+          <option value="HEATMAP">机会热图</option>
+          <option value="ALERTS">Web 预警</option>
           <option value="ALT">山寨币雷达</option>
           <option value="MEME">DEX 历史归档</option>
           <option value="SIGNALS">提醒记录</option>
@@ -86,22 +94,22 @@
             <div class="metric-value">
               <span id="alt-count">0</span><small>个标的</small>
             </div>
-            <div class="metric-caption">按公开现货成交量筛选</div>
+            <div class="metric-caption">动态监控池 · BTC/ETH 不占名额</div>
           </article>
           <article class="metric">
             <div class="metric-label">现货报价覆盖<span>◎</span></div>
             <div class="metric-value">
               <span id="meme-count">0</span><small>个交易对</small>
             </div>
-            <div class="metric-caption">目标 BTC + 99 个 USDT 现货</div>
+            <div class="metric-caption">BTC + ETH + 100 个山寨币</div>
           </article>
           <article class="metric">
-            <div class="metric-label">有效提醒<span>⌁</span></div>
+            <div class="metric-label">未读预警<span>⌁</span></div>
             <div class="metric-value">
               <span id="signal-count">0</span><small>条</small>
             </div>
             <div id="signal-caption" class="metric-caption">
-              观察、入场候选与退出风险
+              Web Alert Center
             </div>
           </article>
         </section>
@@ -121,7 +129,7 @@
               <div class="tabs" role="group" aria-label="标的筛选">
                 <button class="selected" data-filter="ALL">全部</button
                 ><button data-filter="BTC">BTC</button
-                ><button data-filter="ALT">山寨币</button
+                ><button data-filter="ETH">ETH</button><button data-filter="ALT">山寨币</button
                 ><button data-filter="MEME">DEX 历史</button>
               </div>
               <label class="search"
@@ -162,6 +170,18 @@
             <span id="asset-footer">0 个标的</span
             ><span>点击标的查看指标、时间与原始依据 ↗</span>
           </div>
+        </section>
+        <section id="ranking-view" class="panel" hidden>
+          <div class="panel-heading"><div><h2>100 币雷达</h2><span>证据评分不代表上涨概率；缺失数据降低覆盖</span></div>
+          <select id="rank-sort" aria-label="排名排序"><option value="rank">机会排名</option><option value="score_delta">评分变化</option><option value="rank_change">排名上升</option></select></div>
+          <div class="table-scroll"><table><thead><tr><th>排名</th><th>资产</th><th>评分 / 变化</th><th>排名变化</th><th>价格</th><th>OI 5m</th><th>Funding</th><th>相对 BTC / ETH</th><th>覆盖</th></tr></thead><tbody id="ranking-rows"></tbody></table></div>
+        </section>
+        <section id="heatmap-view" class="panel" hidden><div class="panel-heading"><div><h2>机会热图</h2><span>颜色反映当前证据评分；灰色表示缺少可用详细数据</span></div></div><div id="heatmap" class="heatmap"></div></section>
+        <section id="alerts-view" class="panel" hidden>
+          <div class="panel-heading"><div><h2>Web 预警中心</h2><span>同一信号持续更新，保留升级和降级记录</span></div><button id="sound" class="button secondary">声音提示：关闭</button></div>
+          <div class="alert-filters"><select id="alert-level" aria-label="预警级别"><option value="">所有级别</option><option>INFO</option><option>WATCH</option><option>SETUP</option><option>STRONG</option><option>CRITICAL_RISK</option></select>
+          <select id="alert-state" aria-label="预警状态"><option value="">所有状态</option><option value="unread">未读</option><option value="pinned">已固定</option><option value="ACTIVE">有效</option><option value="RESOLVED">已解决</option><option value="EXPIRED">已过期</option></select><input id="alert-search" placeholder="搜索资产或信号" aria-label="搜索预警" /></div>
+          <div id="web-alerts" class="signal-list"></div>
         </section>
         <div id="research-grid" class="research-grid">
           <section class="panel">

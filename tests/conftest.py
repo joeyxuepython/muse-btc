@@ -15,7 +15,7 @@ def now():
 @pytest.fixture
 def settings(tmp_path):
     return Settings(
-        database_path=tmp_path / "test.db", enable_collector=False, max_altcoins=2, max_memes=2
+        database_path=tmp_path / "test.db", enable_collector=False, max_altcoins=1, max_memes=2
     )
 
 
