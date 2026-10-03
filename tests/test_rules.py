@@ -72,28 +72,24 @@ def meme(now, risk=None):
     )
 
 
-def test_meme_unknown_security_can_only_watch(now, settings):
+def test_retired_meme_unknown_security_emits_nothing(now, settings):
     btc = snapshot(now)
     signals = evaluate(meme(now), market_regime(btc, now, settings), now, settings)
-    assert len(signals) == 1
-    assert signals[0].kind == SignalKind.WATCH
-    assert any("不完整" in text for text in signals[0].contradictions)
+    assert signals == []
 
 
-def test_meme_security_block_precedes_activity(now, settings):
+def test_retired_meme_security_block_emits_nothing(now, settings):
     btc = snapshot(now)
     asset = meme(now, TokenRisk(status="BLOCKED", blockers=["蜜罐标记"]))
     signals = evaluate(asset, market_regime(btc, now, settings), now, settings)
-    assert len(signals) == 1
-    assert signals[0].kind == SignalKind.RISK
-    assert signals[0].rule_id == "meme-security-block"
+    assert signals == []
 
 
-def test_meme_quote_time_unknown_prevents_entry_even_with_screening(now, settings):
+def test_retired_meme_screened_quote_emits_nothing(now, settings):
     btc = snapshot(now)
     asset = meme(now, TokenRisk(status="SCREENED"))
     asset.quality_issues = ["QUOTE_TIME_UNVERIFIED"]
-    assert evaluate(asset, market_regime(btc, now, settings), now, settings)[0].kind == "WATCH"
+    assert evaluate(asset, market_regime(btc, now, settings), now, settings) == []
 
 
 def test_goplus_missing_flags_not_treated_as_safe():
@@ -102,3 +98,13 @@ def test_goplus_missing_flags_not_treated_as_safe():
     assert risk.missing_checks
     blocked = token_risk({"is_honeypot": "1"}, "base")
     assert blocked.status == "BLOCKED"
+
+
+def test_incomplete_detail_risk_is_observation_only(now, settings):
+    btc = snapshot(now)
+    btc.features.funding_rate_pct = None
+    btc.features.return_15m_pct = -2
+    btc.features.spot_taker_buy_ratio = 0.3
+    signals = evaluate(btc, market_regime(btc, now, settings), now, settings)
+    assert signals and all(s.kind == SignalKind.WATCH for s in signals)
+    assert all(s.entry_zone is None for s in signals)

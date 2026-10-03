@@ -1,101 +1,89 @@
-# MUSE · 加密市场研判与预警
+# MUSE · 加密市场研判与 Web 预警
 
-服务于实际买卖决策的监控系统。首版同时包含 **BTC、山寨币、DEX Meme**，提供持续采集、证据规则、关注／入场候选／风险／失效提醒、中文监控页面和真实归档数据的前瞻验证。当前为 **0.1 开发版**，规则处于观察期。
+按[最新 V4 计划](docs/requirements/v4-latest-plan.md)开发：**BTC、ETH 独立监控，加 100 个动态 USDT 山寨币，共 102 个现货标的**。币安提供现货，OKX 提供合约。此分支实现 Phase 1；后续宏观、研究、邮箱、链上 Meme、社交与 ML 分阶段推进。Telegram 已取消。
 
-## 启动
+## 已实现的第一阶段
 
-需要 Python 3.12、uv；开发检查另需 Node.js 24。云环境已安装这些工具。
+- Canonical 资产注册表、每日动态名单、固定观察名单、最多 10 次常规替换和 20/30/50 分层。固定名单占用山寨币名额，BTC/ETH 不占用。
+- 每轮刷新所有选中币的价格、24h 成交额和 OKX 当前 OI/Mark；BTC/ETH 每轮采集细节，山寨币分批轮换 K 线、成交、盘口、Funding/OI 历史、主动买卖和散户/大户比例。
+- 实际覆盖、报价与细节更新时间、各组件源时间和接收时间、缺失指标及请求健康统计；不完整或不对齐的数据只能进入观察。
+- 100 币排行、排名与评分变化、解释评分贡献、BTC 基础风险背景、中文雷达/热图及 Web 预警中心。
+- 持久化预警升级历史、已读/未读、固定/解决状态；通过认证的 WebSocket 更新与轮询补充。浏览器通知和声音均由用户主动开启，仅通知 STRONG/CRITICAL_RISK。
+- 原始响应、名单、快照、排行和信号归档；前瞻收益、MFE/MAE、采样极值时间及按当时名单重放。
+- SQLite 增量迁移、备份接口、Docker/Compose、认证、优雅停止和 CI。
+
+指标评分是固定规则的证据评分，**不是上涨概率**。新规则均为 `OBSERVATION_ONLY`。近期成交样本不能冒充完整连续 CVD；去杠杆假设不能冒充真实清算金额。项目没有自动交易功能。
+
+## 本地启动
+
+需要 Python 3.12 和 uv，开发检查另需 Node.js。
 
 ```bash
-cd /workspace/muse-btc
 bash scripts/install.sh
 bash scripts/start.sh
 ```
 
-默认监听本机 8000 端口，同时启动后台采集，每轮结束后等待 120 秒再采集。网页和 API 来自同一个服务；没有外部前端依赖或模拟行情。
-
-云环境中的实时进程不会随环境快照恢复。后续任务需要重新执行启动步骤；当前云环境设置已保存对应指引。长期无人值守运行仍需持续可用的部署实例与进程管理。
-
-可选配置：复制 `.env.example` 为 `.env`，设置采集间隔、标的数量或链上自选地址。**不要提交 `.env`。** 对外监听时，CLI 要求配置 `MUSE_API_TOKEN`，网页首次访问会要求输入口令。API 使用 `Authorization: Bearer ...`，不回传口令。
+默认仅监听本机 8000，每轮完成后等待 120 秒。原 `.env` 保持优先；如要使用 V4 默认规模，设置 `MUSE_MAX_ALTCOINS=100`。旧值 99 会明确显示目标 101，不静默覆盖已有配置。新安装可参考 [.env.example](.env.example)，请勿提交凭据。
 
 ```bash
+# 对外监听必须先在 .env 配置 MUSE_API_TOKEN
 bash scripts/start.sh --host 0.0.0.0 --port 8000
 ```
 
-此命令仅应在已设置访问口令的实例中使用。默认本机监听无需额外凭据。
+网页要求访问口令，API 使用 `Authorization: Bearer ...`；WebSocket 口令通过首条消息发送。浏览器页面关闭后不会继续发通知；Telegram、手机推送和邮件均未启用。
 
-## 三个模块
+## 容器运行
 
-| 模块 | 已实现 | 当前能力边界 |
-| --- | --- | --- |
-| BTC | 1m 已收盘 K 线、24h 行情、盘口快照；价格/成交量、EMA、RSI、ATR、窗口 CVD；Funding、Basis、5m OI 与合约成交方向；风险联动 | 风险判断覆盖 Binance BTC；宏观、链上资金流、完整清算与报告解析尚未接入 |
-| 山寨币 | 当前 Binance USDT 现货成交量前列；相对 BTC 强弱；现货推动、杠杆过热、卖压、潜在逼空 | 非全市场覆盖；现货候选可能包括已上市 Meme；合约数据缺失时不生成入场级提示 |
-| Meme | Ethereum/Base/Solana DEX token profiles 与自选地址、交易池流动性/成交活跃度、EVM GoPlus 公开风险检查 | Profiles 存在宣传选择偏差，非完整新币扫描；Solana 合约安全尚未接入；DEX 不提供可靠报价时间，当前候选保持关注级，不输出入场级提醒 |
+先配置 `.env` 中的 `MUSE_API_TOKEN`，再运行：
 
-新规则统一标记 `OBSERVATION_ONLY`。证据评分是固定规则满足程度，**不是成功概率**。价格区间和失效位是研究参考值；系统没有交易所账户、订单、开仓或资金调度功能。
-
-## 数据源与云网络
-
-核心采集不需要 API key。目前已在线验证 BTC 和山寨币的 Binance 官方只读现货采集，以及 DEX Screener 的真实池子、风险提醒和原始数据追溯，GoPlus 公开检查接口也能返回有效数据。Binance 主站与合约在当前云出口仍返回 HTTP 451，合约适配器已通过契约测试，但云端实时功能尚未完成在线验证。网页明确显示各源的实际状态，系统会重试，绝不会用测试数据填充行情。
-
-请在环境设置中保存已准备的以下允许域名，再验证真实采集：
-
-```text
-api.binance.com
-fapi.binance.com
-api.dexscreener.com
-api.gopluslabs.io
-data-api.binance.vision
-developers.binance.com
+```bash
+docker compose up --build -d
 ```
 
-网络配置草稿的保存不代表已经应用到运行实例。默认现货源为 `data-api.binance.vision`，已取得真实响应；`developers.binance.com` 用于官方文档核验。451 地区限制需要在服务方允许的运行环境解决，本地电脑更换 IP 不改变云服务器出口。可在已验证接口可用的本地运行同一套程序，见 [本地启动](docs/local-run.md)。
+Compose 默认只发布本机 8000 端口，使用持久化 `muse-data` 卷。它不会自动导入工作区的旧数据库。需要迁移旧数据时先使用 SQLite backup API 备份，再将备份导入卷；不要只复制运行中的主数据库而遗漏 WAL，也不要执行 `down -v` 删除历史。
+
+当前受管理云环境可显式使用 [云容器配置](docker-compose.cloud.yml)：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.cloud.yml up --build -d
+```
+
+该配置把既有代理与 CA 信任传入容器，不更改云代理设置。更多见[本地和云环境启动](docs/local-run.md)。长期稳定性仍须在持续在线实例上观察，短时测试不能证明无人值守运行质量。
+
+## 数据与就绪状态
+
+公开核心采集无需交易所账户凭据。默认币安现货源为官方只读 `data-api.binance.vision`；合约只请求 `www.okx.com`。旧 `MUSE_FUTURES_SOURCE=binance/auto` 可继续读取，但 V4 合约实际统一使用 OKX，不再请求 Binance Futures。
+
+OKX 已按[官方能力矩阵](OKX_CAPABILITY_MATRIX.md)核验公共接口。各币的 API 支持和网络状态不同，缺失数据会显式显示。币安出口/IP 问题仍由用户处理，程序不会以测试样本替代失败采集。
+
+`/health` 表示服务存活；`/ready` 检查全部目标报价和 BTC/ETH 技术数据是否新鲜。`derivatives_ready` 单独表示完整合约覆盖，不能把 HTTP 200 解读为全部 OKX 指标可用。
+
+默认每轮 20 个山寨币细节槽位按层分配约 10/5/5：Tier1 约 2 轮、Tier2 约 6 轮、Tier3 约 10 轮。时间取决于接口延迟，超过有效期的指标保持缺失，低层级可能只有报价新鲜。页面显示实际覆盖，不宣称 102 个标的每轮都具备完整指标。OI 历史来自 OKX 真实 5 分钟数据，不依赖本地恰好每 5 分钟采样。
+
+DEX/GoPlus 新采集、分析和提醒在 Phase 1 保持停用，旧历史仍可查看和导出；新计划把链上发现安排在 Phase 4。
+
+## 验证与重放
 
 ```bash
 .venv/bin/muse collect
-```
-
-没有取得真实数据时，该命令返回非零状态。部分采集成功可能返回 `COMPLETE`，仍需查看各源状态与覆盖范围，不能据此认定所有源可用。
-
-`GET /health` 验证服务与数据库；`GET /ready` 验证核心现货/DEX 数据源及 BTC 数据新鲜度，缺失时返回 503。衍生品和合约检查的具体覆盖以数据源状态为准。
-
-## 提醒与追溯
-
-- `WATCH`：早期结构变化或安全检查尚未完成。
-- `ENTRY_CANDIDATE`：现货需求、价格结构、衍生品条件与 BTC 风险背景同时满足；仍处于规则观察期。
-- `RISK`：杠杆过热、现货卖压、合约阻断或低流动性等风险。
-- `INVALIDATED`：已有关注/入场候选触及失效位、出现合约阻断或 BTC 风险恶化。
-
-提醒包含触发时价格、证据类别、反向证据、适用时间窗、失效条件和引用的快照。原始响应带 SHA256 摘要，特征和规则保留版本。提醒与状态变化分别归档；重启后的冷却时间继续生效。
-
-网页支持筛选、详情、原始依据、JSON 导出。浏览器桌面通知需要用户主动开启，且页面保持打开；**当前没有 Telegram、邮件或手机推送服务**。
-
-## 前瞻验证与归档重放
-
-系统在 5m、15m、1h、4h、24h 窗口观察价格变化、相对 BTC 收益、采样最大有利/不利波动和数据覆盖。仅入场候选计算固定手续费/滑点下的纸面净变化；风险提醒的价格变化不当作做空收益。
-
-```bash
 .venv/bin/muse validate
 .venv/bin/muse replay --start 2026-10-01T00:00:00Z --end 2026-10-02T00:00:00Z
-```
-
-重放只使用采集时已经可用的真实快照，按原采集批次的决策时间重建 BTC 联动，不发出新提醒、不修改历史提醒、不优化阈值。**它不是采集之前市场的完整历史回测。** 缺少目标时间窗价格时，结果保持未测量；采样间隔过大的样本不进入覆盖统计。空结果不等于验证通过。
-
-默认往返纸面成本为 30 bps，可通过非负的手续费/滑点配置调整。这不模拟订单执行、盘口冲击、退出条件成交或实际仓位管理。
-
-## 开发与测试
-
-```bash
 bash scripts/check.sh
 UV_CACHE_DIR=/workspace/.cache/uv uv build --wheel
+# 手动真实网络验收：创建独立临时库，连续两轮并重启适配器
+.venv/bin/python scripts/verify_live.py
 ```
 
-测试使用单独临时数据库和明确的接口契约样本，覆盖时间点边界、数据缺失、风险联动、提醒冷却、失效事件、限流、API 认证和样本测量。测试样本只存在于 `tests/`，运行程序不包含演示数据入口。
+后台采集运行时，通过网页“立即采集”或 `/api/collect` 共用单轮锁；独立 CLI 采集应先停止后台服务。
 
-详细说明：[架构](docs/architecture.md)、[规则](docs/rules.md)、[数据源](docs/data-sources.md)、[后续开发范围](docs/roadmap.md)。
+前瞻窗口：15m、1h、4h、24h、3d、7d、14d、30d，兼容旧 5m。缺少未来价格或采样覆盖不足时不产生成功结论；报价有效即可测量结果，无需同一轮再次取得完整技术指标。手续费和滑点只用于入场候选的纸面净变化，不模拟实际订单执行。
 
-## 存储
+重放仅使用采集时已可用的真实数据和名单，保留退市/移出标的历史。当前基础验证不等于完整历史重建、Top-K 排名绩效、提前量校准或 ML 回测。这些能力与预测有效性都不能通过测试数量来证明。
 
-SQLite WAL 数据库默认位于 `data/muse.db`，适用于当前单实例开发版本。每次成功响应和快照都追加保存，不覆盖原始观察。当前没有自动删除历史数据的策略，需要监控磁盘并定期备份数据库；备份运行中的数据库请使用 SQLite backup API，避免仅复制主文件漏掉 WAL 数据。
+## 架构与验收资料
 
-交易所全市场筛选和交易状态每小时刷新；轮询时仅拉取选中标的的 ticker，减少大响应的重复归档。快照保留当时的筛选依据。CLI 单次采集应在停止后台服务时执行；服务运行时请使用网页“立即采集”，它与后台循环共用单轮锁。
+[系统架构与审计](SYSTEM_ARCHITECTURE.md) · [数据源矩阵](DATA_SOURCE_MATRIX.md) · [OKX 能力](OKX_CAPABILITY_MATRIX.md) · [动态名单](UNIVERSE_DESIGN.md) · [数据库](DATABASE_SCHEMA.md) · [特征](FEATURE_DESIGN.md) · [信号与预警](SIGNAL_DESIGN.md) · [验证](BACKTEST_DESIGN.md) · [实施与验收](IMPLEMENTATION_PLAN.md) · [V4 全章状态审计](docs/v4-requirements-audit.md) · [连接器评估](docs/connector-assessment.md)。
+
+默认数据库 `data/muse.db`，适用于单实例；原始响应与研究历史没有自动清理策略，需监控磁盘并备份。未来迁移 PostgreSQL/Timescale、多实例分布式锁、长期运行 SLA 和 Phase 2–6 功能尚未实现。
+
+容器运行依赖由 `uv.lock` 导出并校验哈希。修改依赖后以 `uv export --frozen --no-dev --no-emit-project --output-file requirements.txt` 同步锁定清单。

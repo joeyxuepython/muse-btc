@@ -21,6 +21,8 @@ class Store:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
+            if db.execute("PRAGMA user_version").fetchone()[0] > 2:
+                raise ValueError("Database schema is newer than this application; upgrade the app")
             db.executescript("""
                 PRAGMA journal_mode=WAL;
                 CREATE TABLE IF NOT EXISTS raw_observations (
@@ -61,7 +63,32 @@ class Store:
                 CREATE TABLE IF NOT EXISTS regimes (
                     as_of TEXT PRIMARY KEY, payload TEXT NOT NULL
                 );
-                PRAGMA user_version=1;
+                CREATE TABLE IF NOT EXISTS instrument_registry (
+                    canonical_asset_id TEXT PRIMARY KEY, payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS universe_history (
+                    id TEXT PRIMARY KEY, selected_at TEXT NOT NULL, payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS ranking_history (
+                    batch_id TEXT NOT NULL, as_of TEXT NOT NULL, asset_id TEXT NOT NULL,
+                    payload TEXT NOT NULL, PRIMARY KEY (batch_id, asset_id)
+                );
+                CREATE INDEX IF NOT EXISTS ranking_asset_time
+                    ON ranking_history(asset_id, as_of);
+                CREATE TABLE IF NOT EXISTS web_alerts (
+                    id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, rule_id TEXT NOT NULL,
+                    last_updated TEXT NOT NULL, payload TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS alerts_asset_rule
+                    ON web_alerts(asset_id, rule_id);
+                CREATE TABLE IF NOT EXISTS web_alert_events (
+                    id TEXT PRIMARY KEY, alert_id TEXT NOT NULL,
+                    event_at TEXT NOT NULL, payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS runtime_state (
+                    key TEXT PRIMARY KEY, payload TEXT NOT NULL
+                );
+                PRAGMA user_version=2;
             """)
 
     @contextmanager
@@ -301,3 +328,103 @@ class Store:
                 table: db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 for table in ("raw_observations", "snapshots", "signals", "outcomes")
             }
+
+    def set_state(self, key: str, payload: Any) -> None:
+        with self.connect() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO runtime_state VALUES (?,?)",
+                (key, json.dumps(payload, allow_nan=False)),
+            )
+
+    def state(self, key: str) -> Any:
+        with self.connect() as db:
+            row = db.execute("SELECT payload FROM runtime_state WHERE key=?", (key,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def save_universe(self, payload: dict) -> None:
+        with self.connect() as db:
+            db.execute(
+                "INSERT INTO universe_history VALUES (?,?,?)",
+                (new_id(), payload["selected_at"], json.dumps(payload, allow_nan=False)),
+            )
+            for entry in payload["entries"]:
+                db.execute(
+                    "INSERT OR REPLACE INTO instrument_registry VALUES (?,?)",
+                    (entry["canonical_asset_id"], json.dumps(entry, allow_nan=False)),
+                )
+
+    def universe(self, as_of: datetime | None = None) -> dict | None:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT payload FROM universe_history WHERE selected_at<=? "
+                "ORDER BY selected_at DESC,rowid DESC LIMIT 1",
+                (stamp(as_of or datetime.now(UTC)),),
+            ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def rankings(self, as_of: datetime | None = None) -> list[dict]:
+        with self.connect() as db:
+            at = stamp(as_of or datetime.now(UTC))
+            row = db.execute(
+                "SELECT batch_id FROM ranking_history WHERE as_of<=? "
+                "ORDER BY as_of DESC,rowid DESC LIMIT 1",
+                (at,),
+            ).fetchone()
+            if not row:
+                return []
+            rows = db.execute(
+                "SELECT payload FROM ranking_history WHERE batch_id=?", (row[0],)
+            ).fetchall()
+        return sorted((json.loads(r[0]) for r in rows), key=lambda r: r["rank"])
+
+    def save_rankings(self, rankings: list[dict], at: datetime) -> None:
+        batch_id = new_id()
+        with self.connect() as db:
+            for row in rankings:
+                db.execute(
+                    "INSERT INTO ranking_history VALUES (?,?,?,?)",
+                    (
+                        batch_id,
+                        stamp(at),
+                        row["canonical_asset_id"],
+                        json.dumps(row, allow_nan=False),
+                    ),
+                )
+
+    def alerts(self) -> list[dict]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT payload FROM web_alerts ORDER BY last_updated DESC"
+            ).fetchall()
+        return [json.loads(r[0]) for r in rows]
+
+    def alert_events(self, alert_id: str) -> list[dict]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT payload FROM web_alert_events WHERE alert_id=? ORDER BY event_at,rowid",
+                (alert_id,),
+            ).fetchall()
+        return [json.loads(r[0]) for r in rows]
+
+    def save_alert(self, alert: dict, event: dict | None = None) -> None:
+        with self.connect() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO web_alerts VALUES (?,?,?,?,?)",
+                (
+                    alert["id"],
+                    alert["asset_id"],
+                    alert["rule_id"],
+                    alert["last_updated"],
+                    json.dumps(alert, allow_nan=False),
+                ),
+            )
+            if event:
+                db.execute(
+                    "INSERT INTO web_alert_events VALUES (?,?,?,?)",
+                    (new_id(), alert["id"], event["event_at"], json.dumps(event)),
+                )
+
+    def backup(self, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with self.connect() as source, sqlite3.connect(destination) as target:
+            source.backup(target)

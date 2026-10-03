@@ -997,3 +997,10 @@ dialog::backdrop {
     grid-template-columns: 1fr;
   }
 }
+
+.heatmap {display:grid;grid-template-columns:repeat(auto-fill,minmax(115px,1fr));gap:8px;padding:20px;}
+.heat-cell {display:flex;flex-direction:column;gap:8px;padding:16px;border:1px solid #314742;border-radius:8px;background:rgba(63,158,124,calc(.1 + var(--strength)*.55));color:#e0eee8;cursor:pointer;}
+.heat-cell.missing {background:#23272b;color:#9a9fa4;}
+.alert-filters {display:flex;gap:12px;flex-wrap:wrap;padding:16px;}
+.alert-filters select,.alert-filters input,#rank-sort {background:#171c20;color:#d4e4de;border:1px solid #39413d;border-radius:6px;padding:8px;}
+#alert-badge {font-size:11px;background:#285248;border-radius:10px;padding:2px 6px;}

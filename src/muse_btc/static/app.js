@@ -17,6 +17,10 @@ let requestActive = false;
 let pollActive = false;
 let notificationsEnabled = false;
 const seenSignals = new Set();
+const seenAlerts = new Set();
+let soundEnabled = false;
+let audioContext = null;
+let liveConnection = null;
 const kinds = {
   WATCH: "关注",
   ENTRY_CANDIDATE: "入场候选",
@@ -24,6 +28,7 @@ const kinds = {
   INVALIDATED: "已失效",
 };
 const states = {
+  ARCHIVED: "历史归档",
   ACTIVE: "有效",
   EXPIRED: "已到期",
   INVALIDATED: "已失效",
@@ -103,7 +108,7 @@ function sparkline(values) {
   return `<svg class="sparkline" viewBox="0 0 76 24" role="img" aria-label="已归档价格走势"><polyline points="${points}" fill="none" stroke="${values.at(-1) >= values[0] ? "#7bceb6" : "#f18e8c"}" stroke-width="1.3"/></svg>`;
 }
 function assetRisk(asset) {
-  if (!asset.data_usable) return tag("过期 / 质量不足", "warning");
+  if (!asset.data_usable) return tag("仅观察 · 数据不足或过期", "warning");
   if (asset.risk?.blockers?.length) return tag("风险阻断", "danger");
   if (asset.risk?.status === "NEEDS_VERIFICATION")
     return tag("风险待核实", "warning");
@@ -115,15 +120,15 @@ function renderAssets() {
   const query = $("#search").value.toLowerCase().trim();
   const items = overview.assets.filter(
     (a) =>
-      (filter === "ALL" || a.module === filter) &&
+      (filter === "MEME" ? a.module === "MEME" : a.module !== "MEME" && (filter === "ALL" || a.module === filter)) &&
       `${a.symbol} ${a.address || ""} ${a.asset_id}`
         .toLowerCase()
         .includes(query),
   );
   items.sort(
     (a, b) =>
-      ({ BTC: 0, ALT: 1, MEME: 2 })[a.module] -
-      { BTC: 0, ALT: 1, MEME: 2 }[b.module],
+      ({ BTC: 0, ETH: 1, ALT: 2, MEME: 3 })[a.module] -
+      { BTC: 0, ETH: 1, ALT: 2, MEME: 3 }[b.module],
   );
   $("#assets").innerHTML = items
     .map((a) => {
@@ -136,7 +141,7 @@ function renderAssets() {
             ? f.buys_5m / (f.buys_5m + f.sells_5m)
             : null
           : f.spot_taker_buy_ratio;
-      return `<tr data-asset="${escapeHtml(a.asset_id)}" class="${a.data_usable ? "" : "asset-stale"}" tabindex="0"><td><div class="asset-name"><span class="coin-avatar ${a.module.toLowerCase()}">${a.module === "BTC" ? "₿" : escapeHtml(a.symbol[0])}</span><div><strong>${escapeHtml(a.symbol)}</strong><small>${escapeHtml(a.chain || a.source)} · ${a.module}</small></div></div></td><td>${price(a.price)}</td><td class="${cls(f.return_5m_pct)}">${pct(f.return_5m_pct)}</td><td>${f.relative_volume != null ? format(f.relative_volume) + "×" : "—"}</td><td>${buy != null ? format(buy * 100, 0) + "%" : "—"}${a.module === "MEME" ? '<small class="muted"> 笔数</small>' : ""}</td><td>${f.funding_rate_pct != null ? format(f.funding_rate_pct, 4) + "%" : "—"}</td><td>${a.module === "MEME" ? "池龄 " + (f.pool_age_hours != null ? format(f.pool_age_hours, 1) + "h" : "未知") : sparkline(a.trend)}</td><td>${assetRisk(a)}</td></tr>`;
+      return `<tr data-asset="${escapeHtml(a.asset_id)}" class="${a.data_usable ? "" : "asset-stale"}" tabindex="0"><td><div class="asset-name"><span class="coin-avatar ${a.module.toLowerCase()}">${a.module === "BTC" ? "₿" : escapeHtml(a.symbol[0])}</span><div><strong>${escapeHtml(a.symbol)}</strong><small>${escapeHtml(a.chain || a.source)} · ${a.module}</small></div></div></td><td>${price(a.price)}</td><td class="${cls(f.return_5m_pct)}">${pct(f.return_5m_pct)}</td><td>${f.relative_volume != null ? format(f.relative_volume) + "×" : "—"}</td><td>${buy != null ? format(buy * 100, 0) + "%" : "—"}${a.module === "MEME" ? '<small class="muted"> 笔数</small>' : ""}</td><td>${f.funding_rate_pct != null ? format(f.funding_rate_pct, 4) + "%" : "—"}</td><td>${a.module === "MEME" ? "池龄 " + (f.pool_age_hours != null ? format(f.pool_age_hours, 1) + "h" : "未知") : sparkline(a.trend)}</td><td>${assetRisk(a)}<small>报价 ${time(a.market_time)} · 详细 ${time(a.detail_updated_at)} · 24h成交额 ${price(a.quote_volume_24h)}</small><small>${escapeHtml(a.quality_issues.join(" · "))}</small></td></tr>`;
     })
     .join("");
   $("#empty-assets").hidden = items.length > 0;
@@ -145,7 +150,7 @@ function renderAssets() {
 }
 function renderSignals() {
   const items = overview.signals
-    .filter((s) => !["BTC", "ALT", "MEME"].includes(view) || s.module === view)
+    .filter((s) => !["BTC", "ETH", "ALT", "MEME"].includes(view) || s.module === view)
     .slice(0, view === "SIGNALS" ? 100 : 5);
   $("#signals").innerHTML = items
     .map(
@@ -171,12 +176,12 @@ function renderOverview() {
   $("#alt-count").textContent = overview.assets.filter(
     (a) => a.module === "ALT" && a.data_usable,
   ).length;
-  $("#meme-count").textContent = overview.assets.filter(
-    (a) => a.module === "MEME" && a.data_usable,
-  ).length;
-  $("#signal-count").textContent = overview.signals.filter(
-    (s) => s.state === "ACTIVE" && s.kind !== "INVALIDATED",
-  ).length;
+  const coverage = overview.coverage || {};
+  $("#meme-count").textContent = `${coverage.quotes || 0}/${coverage.target || 102}`;
+  $("#universe-caption").textContent = `报价覆盖 ${coverage.quotes || 0}/${coverage.target || 102} · 本轮详细数据 ${coverage.details || 0} · 更新 ${time(coverage.updated_at)} · 缺失报价 ${(coverage.missing_quotes || []).join(", ") || "无"}`;
+  const unread = (overview.alerts || []).filter((a) => a.unread).length;
+  $("#signal-count").textContent = unread;
+  $("#alert-badge").textContent = unread;
   $("#btc-structure").textContent =
     { UNKNOWN: "未知", UPTREND: "EMA20 > EMA50", DOWNTREND: "EMA20 ≤ EMA50" }[
       overview.regime.btc_structure
@@ -200,7 +205,7 @@ function renderOverview() {
   $("#connection").textContent = "工作台已连接";
   $("#connection").classList.add("online");
   const required = overview.providers.filter((p) =>
-    ["Binance Spot", "DEX Screener"].includes(p.name),
+    ["Binance Spot"].includes(p.name),
   );
   if (required.some((p) => p.state === "UNAVAILABLE"))
     notice(
@@ -214,6 +219,7 @@ function renderOverview() {
   else if (!requestActive) notice("");
   renderAssets();
   renderSignals();
+  renderV4();
 }
 async function loadOverview() {
   if (pollActive) return;
@@ -221,18 +227,22 @@ async function loadOverview() {
   try {
     const first = overview === null;
     overview = await (await api("/api/overview")).json();
-    if (notificationsEnabled && !first)
-      overview.signals
-        .filter((s) => s.state === "ACTIVE" && !seenSignals.has(s.id))
-        .forEach(
-          (s) =>
-            new Notification(`${s.symbol} · ${kinds[s.kind]}`, {
-              body: s.title,
-              tag: s.id,
-            }),
-        );
+    if (!first) (overview.alerts || []).filter((a) =>
+      a.state === "ACTIVE" && ["STRONG", "CRITICAL_RISK"].includes(a.level) &&
+      !seenAlerts.has(a.id + ":" + (a.notification_revision || a.first_seen))).forEach((a) => {
+        if (notificationsEnabled) new Notification(`${a.symbol} · ${a.level}`, {body: a.title, tag: a.id});
+        if (soundEnabled && audioContext) {
+          const oscillator = audioContext.createOscillator();
+          const gain = audioContext.createGain();
+          gain.gain.value = 0.08;
+          oscillator.connect(gain); gain.connect(audioContext.destination);
+          oscillator.start(); oscillator.stop(audioContext.currentTime + 0.15);
+        }
+      });
+    (overview.alerts || []).forEach((a) => seenAlerts.add(a.id + ":" + (a.notification_revision || a.first_seen)));
     overview.signals.forEach((s) => seenSignals.add(s.id));
     renderOverview();
+    if (!liveConnection) connectLive();
   } catch (error) {
     $("#connection").textContent = "连接中断";
     $("#connection").classList.remove("online");
@@ -259,11 +269,25 @@ async function showAsset(id) {
       oi_change_5m_pct: "OI 5m 变化 %",
       basis_pct: "Basis %",
       relative_strength_15m_pct: "相对 BTC 15m 强弱 %",
+      relative_strength_eth_15m_pct: "相对 ETH 15m 强弱 %",
+      oi_usd: "当前 OI（USD）",
+      oi_zscore: "OI Z-score",
+      funding_zscore: "Funding Z-score",
+      perp_taker_delta_usd: "合约主动买卖差额（USD）",
+      long_short_account_ratio: "账户多空比",
+      elite_account_ratio: "大户账户多空比",
+      elite_position_ratio: "大户持仓多空比",
+      cross_venue_premium_pct: "OKX Mark / 币安现货溢价 %",
+      perp_spread_bps: "合约价差 bps",
+      spot_sample_cvd_usdt: "现货近期成交样本 CVD（USDT）",
+      perp_sample_cvd_usdt: "合约近期成交样本 CVD（USDT）",
       liquidity_usd: "池子流动性 USD",
       rsi14: "RSI 14",
       atr14: "ATR 14",
       spread_bps: "价差 bps",
     };
+    const r = (overview?.rankings || []).find((row) => row.asset_id === a.asset_id);
+    const rankDetail = r ? `<h3>排名与评分依据</h3><p>当前 #${r.rank} · 前次 ${r.previous_rank ?? "—"} · 排名变化 ${format(r.rank_change,0)} · 评分变化 ${format(r.score_delta)} · 覆盖 ${format(r.coverage_pct,0)}%</p><ul>${Object.entries(r.score_components).map(([key,value]) => `<li>${escapeHtml(key)}：${format(value)} · 变化 ${format(r.score_changes[key])}</li>`).join("")}</ul><p>缺少：${escapeHtml(r.missing.join(" · ") || "无")}</p>` : "";
     $("#detail-body").innerHTML =
       `<p>${escapeHtml(a.asset_id)}</p><div class="detail-grid"><div class="detail-item"><span>公开观察价格</span><strong>${price(a.price)}</strong></div><div class="detail-item"><span>数据可用时间 UTC+8</span><strong>${time(a.available_at)}</strong></div></div><h3>特征</h3><div class="detail-grid">${Object.entries(
         labels,
@@ -274,7 +298,7 @@ async function showAsset(id) {
         )
         .join(
           "",
-        )}</div>${a.risk ? `<h3>代币风险检查 · ${escapeHtml(a.risk.status)}</h3><ul>${[...a.risk.blockers, ...a.risk.missing_checks.map((x) => "尚未核实：" + x), ...a.risk.warnings].map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>` : ""}<h3>数据质量</h3><p>${escapeHtml(a.quality_issues.join(" · ") || "当前检查未发现缺项")}</p><h3>原始数据追溯</h3><div>${a.raw_ids.map((id, i) => `<button class="button secondary raw-button" data-raw="${escapeHtml(id)}">观察 ${i + 1}</button>`).join(" ")}</div><div id="raw-body"></div>`;
+        )}</div>${rankDetail}<h3>现货 / 合约结构假设</h3><p>${escapeHtml(a.features.spot_perp_structure || "数据不足")} · 去杠杆 ${a.features.deleveraging_signal === null ? "未能判断" : a.features.deleveraging_signal ? "观察到条件" : "未触发"}（非真实清算金额）</p><h3>组件源时间</h3><ul>${Object.entries(a.component_times || {}).map(([key,value]) => `<li>${escapeHtml(key)}：${time(value)}</li>`).join("")}</ul>${a.risk ? `<h3>代币风险检查 · ${escapeHtml(a.risk.status)}</h3><ul>${[...a.risk.blockers, ...a.risk.missing_checks.map((x) => "尚未核实：" + x), ...a.risk.warnings].map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>` : ""}<h3>数据质量</h3><p>${escapeHtml(a.quality_issues.join(" · ") || "当前检查未发现缺项")}</p><h3>原始数据追溯</h3><div>${a.raw_ids.map((id, i) => `<button class="button secondary raw-button" data-raw="${escapeHtml(id)}">观察 ${i + 1}</button>`).join(" ")}</div><div id="raw-body"></div>`;
     if (!$("#detail").open) $("#detail").showModal();
   } catch (e) {
     notice(e.message);
@@ -299,19 +323,23 @@ async function loadValidation() {
   try {
     const r = await (await api("/api/validation")).json();
     $("#validation-body").innerHTML =
-      `<div class="validation-summary"><div><strong>${r.signal_count}</strong><small>归档提醒</small></div><div><strong>${r.outcome_count}</strong><small>已测量时间窗</small></div></div>${r.rules.length ? `<div class="table-scroll"><table><thead><tr><th>规则</th><th>时间窗</th><th>测量 / 覆盖样本</th><th>平均价格变化</th><th>平均不利变化</th></tr></thead><tbody>${r.rules.map((row) => `<tr><td>${escapeHtml(row.rule_id)}</td><td>${row.horizon_seconds / 60}m</td><td>${row.measured_count} / ${row.covered_count}</td><td>${pct(row.mean_return_pct)}</td><td>${pct(row.mean_max_adverse_pct)}</td></tr>`).join("")}</tbody></table></div>` : "<p>尚无已完成的前瞻观察。系统将在 5m、15m、1h、4h 和 24h 时间窗积累真实结果。</p>"}<ul>${r.limitations.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>`;
+      `<div class="validation-summary"><div><strong>${r.signal_count}</strong><small>归档提醒</small></div><div><strong>${r.outcome_count}</strong><small>已测量时间窗</small></div></div>${r.rules.length ? `<div class="table-scroll"><table><thead><tr><th>规则</th><th>时间窗</th><th>测量 / 覆盖样本</th><th>平均价格变化</th><th>平均不利变化</th></tr></thead><tbody>${r.rules.map((row) => `<tr><td>${escapeHtml(row.rule_id)}</td><td>${row.horizon_seconds / 60}m</td><td>${row.measured_count} / ${row.covered_count}</td><td>${pct(row.mean_return_pct)}</td><td>${pct(row.mean_max_adverse_pct)}</td></tr>`).join("")}</tbody></table></div>` : "<p>尚无已完成的前瞻观察。系统将在 15m、1h、4h、24h、3d、7d、14d、30d 时间窗积累真实结果。</p>"}<ul>${r.limitations.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>`;
   } catch (e) {
     notice(e.message);
   }
 }
 function changeView(next) {
   view = next;
-  filter = ["BTC", "ALT", "MEME"].includes(view) ? view : "ALL";
+  filter = ["BTC", "ETH", "ALT", "MEME"].includes(view) ? view : "ALL";
   const names = {
     ALL: "市场总览",
     BTC: "BTC 研判",
+    ETH: "ETH 核心",
+    RANKING: "100 币雷达",
+    HEATMAP: "机会热图",
+    ALERTS: "Web 预警中心",
     ALT: "山寨币雷达",
-    MEME: "Meme 发现",
+    MEME: "DEX 历史归档",
     SIGNALS: "提醒记录",
     VALIDATION: "历史验证",
   };
@@ -325,8 +353,12 @@ function changeView(next) {
   $$("[data-filter]").forEach((b) =>
     b.classList.toggle("selected", b.dataset.filter === filter),
   );
-  $("#monitor-view").hidden = ["SIGNALS", "VALIDATION"].includes(view);
-  $("#research-grid").hidden = view === "VALIDATION";
+  const dedicated = ["RANKING", "HEATMAP", "ALERTS"].includes(view);
+  $("#ranking-view").hidden = view !== "RANKING";
+  $("#heatmap-view").hidden = view !== "HEATMAP";
+  $("#alerts-view").hidden = view !== "ALERTS";
+  $("#monitor-view").hidden = dedicated || ["SIGNALS", "VALIDATION"].includes(view);
+  $("#research-grid").hidden = dedicated || view === "VALIDATION";
   $("#validation-view").hidden = view !== "VALIDATION";
   $(".regime-panel").hidden = view === "SIGNALS";
   $("#research-grid").style.gridTemplateColumns =
@@ -334,6 +366,7 @@ function changeView(next) {
   if (overview) {
     renderAssets();
     renderSignals();
+    renderV4();
   }
   if (view === "VALIDATION") loadValidation();
 }
@@ -341,9 +374,14 @@ $("#mobile-view").addEventListener("change", (event) =>
   changeView(event.target.value),
 );
 document.addEventListener("click", async (event) => {
-  const b = event.target.closest("button, [data-asset], [data-signal]");
+  const b = event.target.closest("button, [data-asset], [data-signal], [data-alert]");
   if (!b) return;
-  if (b.dataset.view) changeView(b.dataset.view);
+  if (b.dataset.alertAction) {
+    try { await api(`/api/alerts/${encodeURIComponent(b.dataset.alertId)}/${b.dataset.alertAction}`, {method: "POST"}); await loadOverview(); $("#detail").close(); }
+    catch (e) { notice(e.message); }
+  }
+  else if (b.dataset.alert) showAlert(b.dataset.alert);
+  else if (b.dataset.view) changeView(b.dataset.view);
   else if (b.dataset.filter) {
     filter = b.dataset.filter;
     $$("[data-filter]").forEach((x) => x.classList.toggle("selected", x === b));
@@ -365,7 +403,7 @@ document.addEventListener("click", async (event) => {
 document.addEventListener("keydown", (event) => {
   if (
     event.key === "Enter" &&
-    event.target.matches("[data-asset], [data-signal]")
+    event.target.matches("[data-asset], [data-signal], [data-alert]")
   )
     event.target.click();
 });
@@ -406,6 +444,7 @@ $("#export").addEventListener("click", async () => {
   }
 });
 $("#notify").addEventListener("click", async () => {
+  if (notificationsEnabled) {notificationsEnabled = false; $("#notify").textContent = "开启浏览器提醒"; return;}
   if (!("Notification" in window)) {
     notice("此浏览器不支持桌面提醒。");
     return;
@@ -439,3 +478,51 @@ setInterval(() => {
   if (view === "VALIDATION") loadValidation();
 }, 10000);
 loadOverview();
+
+function renderV4() {
+  if (!overview) return;
+  const rows = [...(overview.rankings || [])];
+  const key = $("#rank-sort").value;
+  rows.sort((a,b) => key === "rank" ? a.rank-b.rank : (b[key] ?? -999)-(a[key] ?? -999));
+  const assets = new Map(overview.assets.map((a) => [a.asset_id, a]));
+  $("#ranking-rows").innerHTML = rows.map((r) => {
+    const f = assets.get(r.asset_id)?.features || {};
+    return `<tr data-asset="${escapeHtml(r.asset_id)}" tabindex="0"><td>${r.rank}</td><td>${escapeHtml(r.symbol)}<small>${escapeHtml(r.tier || "")}</small></td><td>${format(r.score)} / ${format(r.score_delta)}</td><td>${format(r.rank_change,0)}</td><td>${price(r.price)}</td><td>${pct(f.oi_change_5m_pct)}</td><td>${pct(f.funding_rate_pct)}</td><td>${pct(f.relative_strength_15m_pct)} / ${pct(f.relative_strength_eth_15m_pct)}</td><td>${format(r.coverage_pct,0)}%${r.data_ready ? "" : " · 仅观察"}</td></tr>`;
+  }).join("");
+  $("#heatmap").innerHTML = rows.map((r) => `<button class="heat-cell ${r.data_ready ? "" : "missing"}" style="--strength:${r.score / 100}" data-asset="${escapeHtml(r.asset_id)}"><strong>${escapeHtml(r.symbol.replace("USDT", ""))}</strong><span>#${r.rank} · ${format(r.score,0)}</span><small>覆盖 ${format(r.coverage_pct,0)}%</small></button>`).join("");
+  const level = $("#alert-level").value, state = $("#alert-state").value;
+  const query = $("#alert-search").value.toLowerCase();
+  const alerts = (overview.alerts || []).filter((a) => (!level || a.level === level) &&
+    (!state || (state === "unread" ? a.unread : state === "pinned" ? a.pinned : a.state === state)) &&
+    `${a.symbol} ${a.title} ${a.rule_id}`.toLowerCase().includes(query));
+  $("#web-alerts").innerHTML = alerts.length ? alerts.map((a) => `<article class="signal-row" data-alert="${escapeHtml(a.id)}" tabindex="0"><div class="signal-top">${tag(a.level, a.level === "CRITICAL_RISK" ? "danger" : "warning")}<strong>${escapeHtml(a.symbol)}</strong>${a.unread ? tag("未读") : ""}${a.pinned ? tag("已固定") : ""}<time>${time(a.last_updated)}</time></div><p>${escapeHtml(a.title)}</p><div class="signal-meta"><span>评分 ${format(a.score)} · 变化 ${format(a.score_delta)}</span><span>${escapeHtml(states[a.state] || a.state)}</span><span>首次 ${time(a.first_seen)}</span></div></article>`).join("") : '<p class="empty">暂无符合条件的真实预警。</p>';
+}
+async function showAlert(id) {
+  try {
+    const {alert:a,events,snapshot} = await (await api(`/api/alerts/${encodeURIComponent(id)}`)).json();
+    $("#detail-title").textContent = `${a.symbol} · ${a.level}`;
+    const list = (values) => `<ul>${values.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>`;
+    const action = (name,label) => `<button class="button secondary" data-alert-id="${escapeHtml(a.id)}" data-alert-action="${name}">${label}</button>`;
+    $("#detail-body").innerHTML = `<p>${escapeHtml(a.title)} · 评分 ${format(a.score)}（非上涨概率）</p><p>首次发现 ${time(a.first_seen)} · 最新 ${time(a.last_updated)} · 当时价格 ${price(a.price)}</p><h3>支持证据</h3>${list(a.evidence)}<h3>反向证据</h3>${list(a.contradictions)}<h3>失效条件</h3>${list(a.invalidation_conditions)}<h3>数据新鲜度</h3><p>报价 ${time(snapshot?.market_time)} · 详细 ${time(snapshot?.detail_updated_at)}</p><h3>状态变化</h3>${list(events.map((e) => `${time(e.event_at)} · ${e.action || e.reason} ${e.from_level || ""} → ${e.to_level || ""}`))}<p>${action(a.read_at ? "unread" : "read", a.read_at ? "标为未读" : "标为已读")} ${action(a.pinned ? "unpin" : "pin", a.pinned ? "取消固定" : "固定预警")} ${action("resolve","标为已解决")}</p><button class="button secondary" data-asset="${escapeHtml(a.asset_id)}">查看行情与原始依据</button>`;
+    if (!$("#detail").open) $("#detail").showModal();
+  } catch (e) {notice(e.message);}
+}
+["#rank-sort", "#alert-level", "#alert-state"].forEach((id) => $(id).addEventListener("change", renderV4));
+$("#alert-search").addEventListener("input",renderV4);
+$("#sound").addEventListener("click",async () => {
+  soundEnabled = !soundEnabled;
+  if (soundEnabled) {
+    const Context = window.AudioContext || window.webkitAudioContext;
+    if (!Context) {soundEnabled = false; notice("浏览器不支持声音提示");}
+    else {audioContext ||= new Context(); await audioContext.resume();}
+  }
+  $("#sound").textContent = `声音提示：${soundEnabled ? "开启" : "关闭"}`;
+});
+
+function connectLive() {
+  const connection = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/live`);
+  liveConnection = connection;
+  connection.onopen = () => connection.send(JSON.stringify({token}));
+  connection.onmessage = (event) => {if (JSON.parse(event.data).type === "update") loadOverview();};
+  connection.onclose = () => {liveConnection = null; setTimeout(() => {if (!liveConnection && overview) connectLive();}, 5000);};
+}

@@ -1,0 +1,92 @@
+{
+  "database": "/tmp/muse-v4-acceptance-a5dadf14.db",
+  "cycles": [
+    {
+      "cycle": 1,
+      "result": {
+        "status": "COMPLETE",
+        "snapshots": 102,
+        "signals": 0,
+        "outcomes": 0,
+        "finished_at": "2026-10-03T03:55:36.741139+00:00"
+      },
+      "target": 102,
+      "quotes": 102,
+      "detail_coverage": 22,
+      "ranks": 100,
+      "members": 102,
+      "oi": 102,
+      "funding": 22,
+      "taker": 21,
+      "core": [
+        {
+          "symbol": "BTCUSDT",
+          "funding": 7.190847078999999e-05,
+          "oi_5m": -0.00505348580988052,
+          "basis": -0.047482427367828706,
+          "perp_spread": 0.011817153189398922,
+          "issues": []
+        },
+        {
+          "symbol": "ETHUSDT",
+          "funding": 0.0067226765339,
+          "oi_5m": 0.005056901184929963,
+          "basis": -0.04102013342730526,
+          "perp_spread": 0.03730612473384236,
+          "issues": []
+        }
+      ],
+      "round": 1
+    },
+    {
+      "cycle": 2,
+      "result": {
+        "status": "COMPLETE",
+        "snapshots": 102,
+        "signals": 1,
+        "outcomes": 0,
+        "finished_at": "2026-10-03T03:55:53.623709+00:00"
+      },
+      "target": 102,
+      "quotes": 102,
+      "detail_coverage": 42,
+      "ranks": 100,
+      "members": 102,
+      "oi": 102,
+      "funding": 42,
+      "taker": 39,
+      "core": [
+        {
+          "symbol": "BTCUSDT",
+          "funding": 7.190847078999999e-05,
+          "oi_5m": -0.009945179351689148,
+          "basis": -0.04760048663524641,
+          "perp_spread": 0.011817153189398922,
+          "issues": []
+        },
+        {
+          "symbol": "ETHUSDT",
+          "funding": 0.0067226765339,
+          "oi_5m": -0.005755906598670091,
+          "basis": -0.041016615458056016,
+          "perp_spread": 0.03730334144762435,
+          "issues": []
+        }
+      ],
+      "round": 2
+    }
+  ],
+  "api": {
+    "ready_code": 200,
+    "ready": {
+      "status": "ready",
+      "market_data_ready": true,
+      "scope": "USDT_SPOT_MONITORING",
+      "derivatives_ready": false
+    },
+    "assets": 102,
+    "rankings": 100,
+    "alerts": 1
+  },
+  "checked_at": "2026-10-03T03:55:53.882811+00:00"
+}

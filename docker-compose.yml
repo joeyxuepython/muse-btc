@@ -1,0 +1,17 @@
+services:
+  muse:
+    build: .
+    init: true
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      MUSE_DATABASE_PATH: /app/data/muse.db
+    volumes:
+      - muse-data:/app/data
+    restart: unless-stopped
+    stop_grace_period: 30s
+volumes:
+  muse-data:

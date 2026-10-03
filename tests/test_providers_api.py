@@ -78,15 +78,101 @@ def public_api_fixture(request: httpx.Request) -> httpx.Response:
             {"timestamp": stamp - 300000, "sumOpenInterest": "100"},
             {"timestamp": stamp, "sumOpenInterest": "101"},
         ]
+    elif path.endswith("/public/instruments"):
+        data = {
+            "code": "0",
+            "msg": "",
+            "data": [
+                {
+                    "instId": f"{s[:-4]}-USDT-SWAP",
+                    "instFamily": f"{s[:-4]}-USDT",
+                    "state": "live",
+                    "settleCcy": "USDT",
+                    "ctType": "linear",
+                    "ctVal": "0.1",
+                    "ctMult": "1",
+                    "ctValCcy": s[:-4],
+                }
+                for s in symbols
+            ],
+        }
+    elif path.endswith("/market/tickers"):
+        data = {
+            "code": "0",
+            "data": [
+                {
+                    "instId": f"{s[:-4]}-USDT-SWAP",
+                    "last": "121.36",
+                    "volCcy24h": "1000000",
+                    "ts": str(stamp),
+                }
+                for s in symbols
+            ],
+        }
     elif path.endswith("/public/funding-rate"):
         inst = request.url.params.get("instId", "")
-        data = {"code": "0", "msg": "", "data": [{"instId": inst, "fundingRate": "0.0001"}]}
+        data = {"code": "0", "data": [{"instId": inst, "fundingRate": "0.0001", "ts": str(stamp)}]}
+    elif path.endswith("/public/funding-rate-history"):
+        data = {
+            "code": "0",
+            "data": [
+                {"fundingTime": str(stamp - i * 28800000), "realizedRate": str(0.00001 * i)}
+                for i in range(1, 21)
+            ],
+        }
     elif path.endswith("/public/open-interest"):
-        inst = request.url.params.get("instId", "")
-        data = {"code": "0", "msg": "", "data": [{"instId": inst, "oiUsd": "101"}]}
-    elif path.endswith("/market/ticker"):
-        inst = request.url.params.get("instId", "")
-        data = {"code": "0", "msg": "", "data": [{"instId": inst, "last": "121.36"}]}
+        data = {
+            "code": "0",
+            "data": [
+                {"instId": f"{s[:-4]}-USDT-SWAP", "oi": "101", "oiUsd": "10100", "ts": str(stamp)}
+                for s in symbols
+            ],
+        }
+    elif path.endswith("/public/mark-price"):
+        data = {
+            "code": "0",
+            "data": [
+                {"instId": f"{s[:-4]}-USDT-SWAP", "markPx": "121.36", "ts": str(stamp)}
+                for s in symbols
+            ],
+        }
+    elif path.endswith("/market/index-tickers"):
+        data = {"code": "0", "data": [{"idxPx": "121.36", "ts": str(stamp)}]}
+    elif path.endswith("/contracts/open-interest-history"):
+        data = {
+            "code": "0",
+            "data": [
+                [str(stamp - i * 300000), str(101 - i), str(101 - i), str((101 - i) * 100)]
+                for i in range(20)
+            ],
+        }
+    elif path.endswith("/taker-volume-contract"):
+        data = {"code": "0", "data": [[str(stamp), "350", "650"]]}
+    elif "long-short-" in path and "/rubik/" in path:
+        data = {"code": "0", "data": [[str(stamp), "1.5"]]}
+    elif path.endswith("/market/books"):
+        data = {
+            "code": "0",
+            "data": [
+                {
+                    "ts": str(stamp),
+                    "bids": [["121.35", "10", "0", "2"]],
+                    "asks": [["121.37", "10", "0", "2"]],
+                }
+            ],
+        }
+    elif path.endswith("/aggTrades"):
+        data = [{"a": 1, "T": stamp, "p": "121.36", "q": "10", "m": False}]
+    elif path.endswith("/market/trades"):
+        data = {
+            "code": "0",
+            "data": [{"tradeId": "1", "ts": str(stamp), "px": "121.36", "sz": "10", "side": "buy"}],
+        }
+    elif path.endswith("/market/candles"):
+        data = {
+            "code": "0",
+            "data": [[str(stamp - 60000), "121", "122", "120", "121.36", "10", "1", "121.36", "1"]],
+        }
     elif path == "/token-profiles/latest/v1":
         data = [{"chainId": "ethereum", "tokenAddress": address}]
     elif "/token-pairs/v1/" in path:
@@ -111,7 +197,7 @@ def public_api_fixture(request: httpx.Request) -> httpx.Response:
 
 
 @pytest.mark.asyncio
-async def test_public_adapters_normalize_all_three_modules_and_keep_lineage(settings, store):
+async def test_public_adapters_normalize_v4_core_and_alt_and_keep_lineage(settings, store):
     providers = Providers(settings, store, transport=httpx.MockTransport(public_api_fixture))
     try:
         # OKX 无公开 OI 历史接口，持仓量变化依赖本地累积：预置 5 分钟前的读数。
@@ -121,17 +207,16 @@ async def test_public_adapters_normalize_all_three_modules_and_keep_lineage(sett
         cex = await providers.binance()
         memes = await providers.memes()
         assert len(cex) == 3
-        assert {s.module for s in cex + memes} == {"BTC", "ALT", "MEME"}
+        assert {s.module for s in cex + memes} == {"BTC", "ETH", "ALT"}
         assert not any(s.symbol == "USDCUSDT" for s in cex)
         assert cex[0].features.funding_rate_pct == pytest.approx(0.01)
         assert cex[0].features.oi_change_5m_pct == pytest.approx(1)
         assert cex[0].features.basis_pct == pytest.approx(0)
-        assert "BASIS_CROSS_EXCHANGE" in cex[0].quality_issues
+        assert cex[0].features.cross_venue_premium_pct == pytest.approx(0)
         assert "OKX" in providers.futures_source_used
         statuses = {s.name: s.state for s in store.statuses()}
         assert statuses["OKX Futures"] == "READY"
-        assert memes[0].risk.status == "BLOCKED"
-        assert memes[0].features.relative_volume == pytest.approx(5.5)
+        assert memes == []
         for snap in cex + memes:
             assert snap.raw_ids
             assert all(store.raw(raw_id) for raw_id in snap.raw_ids)
@@ -146,7 +231,7 @@ async def test_missing_futures_does_not_destroy_spot_monitoring(settings, store)
     settings.futures_source = "binance"
 
     def handler(request):
-        if request.url.host == "fapi.binance.com":
+        if request.url.host == "www.okx.com":
             return httpx.Response(451)
         return public_api_fixture(request)
 
@@ -158,7 +243,7 @@ async def test_missing_futures_does_not_destroy_spot_monitoring(settings, store)
         assert all("DERIVATIVES_UNAVAILABLE" in s.quality_issues for s in snapshots)
         statuses = {s.name: s.state for s in store.statuses()}
         assert statuses["Binance Spot"] == "READY"
-        assert statuses["Binance Futures"] == "UNAVAILABLE"
+        assert statuses["OKX Futures"] == "UNAVAILABLE"
     finally:
         await providers.close()
 
@@ -211,9 +296,10 @@ def test_api_collection_dashboard_details_export_and_validation(settings):
         assert client.get("/static/app.js").status_code == 200
         result = client.post("/api/collect").json()
         assert result["status"] == "COMPLETE"
-        assert result["snapshots"] == 4
+        assert result["snapshots"] == 3
         overview = client.get("/api/overview").json()
-        assert {a["module"] for a in overview["assets"]} == {"BTC", "ALT", "MEME"}
+        assert {a["module"] for a in overview["assets"]} == {"BTC", "ETH", "ALT"}
+        assert overview["coverage"]["quotes"] == 3
         assert overview["signals"]
         signal = overview["signals"][0]
         detail = client.get(f"/api/signals/{signal['id']}").json()

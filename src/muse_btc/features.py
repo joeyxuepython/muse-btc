@@ -78,8 +78,10 @@ def candle_features(candles: list[Candle], as_of: datetime) -> tuple[Features, l
 
 
 def depth_features(book: dict, features: Features) -> None:
-    bids = [(float(price), float(qty)) for price, qty in book.get("bids", [])]
-    asks = [(float(price), float(qty)) for price, qty in book.get("asks", [])]
+    bids = [(float(price), float(qty)) for price, qty in (row[:2] for row in book.get("bids", []))]
+    asks = [(float(price), float(qty)) for price, qty in (row[:2] for row in book.get("asks", []))]
+    if any(not math.isfinite(p) or not math.isfinite(q) or p <= 0 or q < 0 for p, q in bids + asks):
+        raise ValueError("Invalid order book price or quantity")
     if not bids or not asks:
         return
     best_bid, best_ask = max(p for p, _ in bids), min(p for p, _ in asks)
@@ -93,6 +95,46 @@ def depth_features(book: dict, features: Features) -> None:
     features.ask_depth_1pct_usd = ask_depth
     total = bid_depth + ask_depth
     features.depth_imbalance = (bid_depth - ask_depth) / total if total > 0 else None
+
+
+def cross_venue_features(features, price, times, now, settings):
+    """Independent normalized flow hypotheses; never estimates actual liquidations."""
+    features.spot_perp_structure = features.deleveraging_signal = None
+    features.basis_pct = features.cross_venue_premium_pct = None
+
+    def aligned(*names):
+        stamps = [times.get(name) for name in names]
+        return (
+            all(
+                t is not None and 0 <= (now - t).total_seconds() <= settings.stale_seconds
+                for t in stamps
+            )
+            and (max(stamps) - min(stamps)).total_seconds() <= settings.time_alignment_seconds
+        )
+
+    if features.mark_price and price > 0 and aligned("mark", "quote"):
+        features.cross_venue_premium_pct = (features.mark_price / price - 1) * 100
+    if features.mark_price and features.index_price and aligned("mark", "index"):
+        features.basis_pct = (features.mark_price / features.index_price - 1) * 100
+    spot, perp = features.spot_taker_buy_ratio, features.perp_taker_buy_ratio
+    if spot is not None and perp is not None and aligned("candles", "taker"):
+        if spot >= 0.58 and perp < 0.55:
+            features.spot_perp_structure = "SPOT_LED_HYPOTHESIS"
+        elif perp >= 0.58 and spot < 0.55:
+            features.spot_perp_structure = "PERP_LED_HYPOTHESIS"
+        elif spot >= 0.58 and perp >= 0.58:
+            features.spot_perp_structure = "JOINT_DEMAND_HYPOTHESIS"
+        else:
+            features.spot_perp_structure = "MIXED"
+    if (
+        features.return_5m_pct is not None
+        and features.oi_change_5m_pct is not None
+        and perp is not None
+        and aligned("candles", "oi_history", "taker")
+    ):
+        features.deleveraging_signal = (
+            features.return_5m_pct < -0.5 and features.oi_change_5m_pct < -1 and perp < 0.45
+        )
 
 
 def derivatives_features(

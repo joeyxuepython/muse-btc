@@ -1,15 +1,18 @@
+import asyncio
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .alerts import alert_view, change_alert
 from .config import Settings
 from .models import ProviderState, utc_now
 from .providers import Providers
-from .rules import market_regime, usable
+from .rules import market_regime, quote_usable, usable
 from .service import Collector, signal_view
 from .storage import Store
 from .validation import validation_report
@@ -22,6 +25,25 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
     store = Store(config.database_path)
     providers = providers_factory(config, store)
     collector = Collector(config, store, providers)
+
+    def ranking_views(now):
+        rows = store.rankings(now)
+        for row in rows:
+            snapshot = store.snapshot(row["snapshot_id"])
+            row["as_of_data_ready"] = row["data_ready"]
+            row["data_ready"] = bool(snapshot and usable(snapshot, now, config))
+            row["quote_fresh"] = bool(snapshot and quote_usable(snapshot, now, config))
+        return rows
+
+    def alert_response(alert, now):
+        result = alert_view(alert, now)
+        snapshot = store.snapshot(alert["snapshot_id"])
+        result["data_current"] = bool(snapshot and usable(snapshot, now, config))
+        result["lifecycle_state"] = result["state"]
+        if result["state"] == "ACTIVE" and not result["data_current"]:
+            result["state"] = "PAUSED"
+            result["unread"] = False
+        return result
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -73,7 +95,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
         now = utc_now()
         snapshots = store.latest_snapshots(now)
         statuses = {s.name: s for s in store.statuses()}
-        required = ["Binance Spot", "DEX Screener"]
+        required = ["Binance Spot"]
         available = all(
             name in statuses
             and statuses[name].state == ProviderState.READY
@@ -81,13 +103,38 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             for name in required
         )
         btc = next((s for s in snapshots if s.asset_id == "binance:BTCUSDT"), None)
-        if not available or not btc or not usable(btc, now, config):
-            return JSONResponse({"status": "degraded", "market_data_ready": False}, status_code=503)
+        eth = next((s for s in snapshots if s.asset_id == "binance:ETHUSDT"), None)
+        fresh_quotes = [
+            s
+            for s in snapshots
+            if s.symbol in providers.universe_symbols
+            and s.source == "Binance"
+            and s.market_time <= now
+            and (now - s.market_time).total_seconds() <= config.stale_seconds
+        ]
+        if (
+            not available
+            or not btc
+            or not usable(btc, now, config)
+            or not eth
+            or not usable(eth, now, config)
+            or len(fresh_quotes) < config.max_altcoins + 2
+        ):
+            return JSONResponse(
+                {
+                    "status": "degraded",
+                    "market_data_ready": False,
+                    "fresh_quotes": len(fresh_quotes),
+                    "target": config.max_altcoins + 2,
+                    "coverage": providers.coverage,
+                },
+                status_code=503,
+            )
         derivatives = statuses.get("OKX Futures") or statuses.get("Binance Futures")
         return {
             "status": "ready",
             "market_data_ready": True,
-            "scope": "SPOT_AND_DEX_MONITORING",
+            "scope": "USDT_SPOT_MONITORING",
             "derivatives_ready": bool(
                 derivatives
                 and derivatives.state == ProviderState.READY
@@ -101,10 +148,22 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
         snapshots = store.latest_snapshots(now)
         btc = next((s for s in snapshots if s.asset_id == "binance:BTCUSDT"), None)
         assets = []
+        active_symbols = set(providers.universe_symbols)
         for snapshot in snapshots:
+            if (
+                active_symbols
+                and snapshot.source == "Binance"
+                and snapshot.symbol not in active_symbols
+            ):
+                continue
             item = snapshot.model_dump(mode="json", exclude={"candles"})
             item["age_seconds"] = max(0, (now - snapshot.available_at).total_seconds())
             item["data_usable"] = usable(snapshot, now, config)
+            item["quote_fresh"] = quote_usable(snapshot, now, config)
+            item["data_health"] = (
+                "FRESH" if item["data_usable"] else "DELAYED" if item["quote_fresh"] else "STALE"
+            )
+            item["monitoring_active"] = snapshot.module != "MEME"
             item["trend"] = [c.close for c in snapshot.candles[-60:]]
             assets.append(item)
         statuses = []
@@ -116,6 +175,11 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
                 item["message"] = "检查结果已过期，等待本轮重新验证"
             statuses.append(item)
         return {
+            "coverage": providers.coverage,
+            "universe": store.universe(now),
+            "rankings": ranking_views(now),
+            "alerts": [alert_response(a, now) for a in store.alerts()],
+            "request_metrics": providers.metrics,
             "as_of": now.isoformat(),
             "regime": market_regime(btc, now, config),
             "assets": assets,
@@ -143,6 +207,45 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             for s in items
             if (not module or s.module == module) and (not kind or s.kind == kind)
         ]
+
+    @app.get("/api/universe")
+    def universe():
+        return store.universe()
+
+    @app.get("/api/rankings")
+    def rankings():
+        return ranking_views(utc_now())
+
+    @app.get("/api/alerts")
+    def alerts(level: str | None = None, unread: bool = False, pinned: bool = False):
+        now = utc_now()
+        items = [alert_response(a, now) for a in store.alerts()]
+        return [
+            a
+            for a in items
+            if (not level or a["level"] == level)
+            and (not unread or a["unread"])
+            and (not pinned or a["pinned"])
+        ]
+
+    @app.get("/api/alerts/{alert_id}")
+    def alert_detail(alert_id: str):
+        alert = next((a for a in store.alerts() if a["id"] == alert_id), None)
+        if not alert:
+            raise HTTPException(404, "预警不存在")
+        snapshot = store.snapshot(alert["snapshot_id"])
+        return {
+            "alert": alert_response(alert, utc_now()),
+            "snapshot": snapshot,
+            "events": store.alert_events(alert_id),
+        }
+
+    @app.post("/api/alerts/{alert_id}/{action}")
+    def update_alert(alert_id: str, action: Literal["read", "unread", "pin", "unpin", "resolve"]):
+        result = change_alert(store, alert_id, action, utc_now())
+        if not result:
+            raise HTTPException(404, "预警不存在")
+        return result
 
     @app.get("/api/signals/{signal_id}")
     def signal_detail(signal_id: str):
@@ -191,5 +294,37 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
     @app.post("/api/collect")
     async def collect():
         return await collector.collect_once()
+
+    @app.websocket("/api/live")
+    async def live(websocket: WebSocket):
+        origin = websocket.headers.get("origin")
+        scheme = "https" if websocket.url.scheme == "wss" else "http"
+        if origin and origin != f"{scheme}://{websocket.headers.get('host')}":
+            await websocket.close(code=1008)
+            return
+        await websocket.accept()
+        try:
+            auth = await asyncio.wait_for(websocket.receive_json(), timeout=10)
+            supplied = auth.get("token", "") if isinstance(auth, dict) else ""
+            if config.api_token and (
+                not isinstance(supplied, str)
+                or not secrets.compare_digest(supplied, config.api_token.get_secret_value())
+            ):
+                await websocket.close(code=1008)
+                return
+            last_update = object()
+            while True:
+                finished = collector.last_result.get("finished_at")
+                if last_update != finished:
+                    await websocket.send_json({"type": "update", "finished_at": finished})
+                    last_update = finished
+                try:
+                    message = await asyncio.wait_for(websocket.receive(), timeout=3)
+                    if message["type"] == "websocket.disconnect":
+                        return
+                except TimeoutError:
+                    pass
+        except (WebSocketDisconnect, TimeoutError):
+            return
 
     return app

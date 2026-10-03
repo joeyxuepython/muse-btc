@@ -3,11 +3,11 @@ from datetime import datetime, timedelta
 from itertools import groupby
 
 from .config import Settings
-from .models import Outcome, Signal, SignalKind, Snapshot
-from .rules import RULE_VERSION, evaluate, market_regime, usable
+from .models import Module, Outcome, Signal, SignalKind, Snapshot
+from .rules import RULE_VERSION, evaluate, market_regime, quote_usable
 from .storage import Store
 
-HORIZONS = (300, 900, 3600, 14400, 86400)
+HORIZONS = (300, 900, 3600, 14400, 86400, 259200, 604800, 1209600, 2592000)
 
 
 def measure_signal(
@@ -21,7 +21,7 @@ def measure_signal(
     history = [
         s
         for s in store.snapshot_range(signal.emitted_at, end_limit, signal.asset_id)
-        if s.market_time > signal.emitted_at and usable(s, s.available_at, settings)
+        if s.market_time > signal.emitted_at and quote_usable(s, s.available_at, settings)
     ]
     end = next((s for s in history if s.market_time >= target), None)
     if end is None:
@@ -42,7 +42,7 @@ def measure_signal(
             (
                 s
                 for s in btc_history
-                if s.market_time >= target and usable(s, s.available_at, settings)
+                if s.market_time >= target and quote_usable(s, s.available_at, settings)
             ),
             None,
         )
@@ -67,6 +67,12 @@ def measure_signal(
         round_trip_cost_bps=cost,
         sample_count=len(measured),
         max_observation_gap_seconds=max_gap,
+        time_to_mfe_seconds=(
+            stamps[returns.index(max(returns))] - signal.emitted_at
+        ).total_seconds(),
+        time_to_mae_seconds=(
+            stamps[returns.index(min(returns))] - signal.emitted_at
+        ).total_seconds(),
     )
 
 
@@ -74,7 +80,7 @@ def validate_pending(store: Store, now: datetime, settings: Settings) -> int:
     completed = {(o.signal_id, o.horizon_seconds) for o in store.outcomes()}
     count = 0
     for signal in store.signals(limit=100000, as_of=now):
-        if signal.kind == SignalKind.INVALIDATED:
+        if signal.module == Module.MEME or signal.kind == SignalKind.INVALIDATED:
             continue
         for horizon in HORIZONS:
             if (signal.id, horizon) not in completed:
@@ -146,8 +152,16 @@ def replay(store: Store, start: datetime, end: datetime, settings: Settings) -> 
     # Reproduce the collection barrier: all evidence is available before decisions.
     for as_of, group in groupby(archived, key=lambda s: s.decision_at or s.available_at):
         batch = []
+        membership = store.universe(as_of)
+        allowed = (
+            {"binance:" + r["binance_symbol"] for r in membership["entries"]}
+            if membership
+            else None
+        )
         for snapshot in group:
-            if snapshot.feature_version != "features-v1":
+            if allowed is not None and snapshot.asset_id not in allowed:
+                continue
+            if snapshot.feature_version not in {"features-v1", "features-v4-1"}:
                 skipped += 1
                 continue
             if snapshot.available_at > as_of:
