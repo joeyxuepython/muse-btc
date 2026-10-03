@@ -174,6 +174,8 @@ class Providers:
         self.exchange_cache: tuple | None = None
         self.universe_symbols: list[str] = []
         self.universe_raw_id: str | None = None
+        self.detail_cursor = 0
+        self.coverage: dict = {}
         self.futures_errors: set[str] = set()
         self.futures_source_used: set[str] = set()
 
@@ -248,6 +250,16 @@ class Providers:
             return payload, raw_id, received_at
 
     async def binance(self) -> list[Snapshot]:
+        self.coverage = {
+            "target": self.settings.max_altcoins + 1,
+            "selected": len(self.universe_symbols),
+            "quotes": 0,
+            "details": 0,
+            "updated_at": None,
+            "symbols": self.universe_symbols,
+            "missing_quotes": self.universe_symbols,
+            "missing_details": self.universe_symbols,
+        }
         try:
             self.futures_errors.clear()
             self.futures_source_used.clear()
@@ -332,18 +344,44 @@ class Providers:
                 self.universe_symbols = [row["symbol"] for row in selected]
                 self.universe_raw_id = ticker_raw
             common_raw = list(dict.fromkeys([ticker_raw, exchange_raw, self.universe_raw_id]))
+            # Quotes cover the entire universe every cycle; expensive data rotates.
+            alts = self.universe_symbols[1:]
+            batch = min(self.settings.detail_batch_size, len(alts))
+            detail_symbols = {"BTCUSDT"}
+            if alts:
+                detail_symbols.update(
+                    alts[(self.detail_cursor + i) % len(alts)] for i in range(batch)
+                )
+                self.detail_cursor = (self.detail_cursor + batch) % len(alts)
             results = await asyncio.gather(
-                *(self._binance_asset(row, common_raw) for row in selected),
+                *(
+                    self._quote_asset(row, common_raw, row["symbol"] in detail_symbols)
+                    for row in selected
+                ),
                 return_exceptions=True,
             )
             snapshots = [row for row in results if isinstance(row, Snapshot)]
             errors = [row for row in results if isinstance(row, Exception)]
+            self.coverage = {
+                "target": self.settings.max_altcoins + 1,
+                "selected": len(self.universe_symbols),
+                "quotes": len(snapshots),
+                "details": sum(s.detail_updated_at is not None for s in snapshots),
+                "updated_at": ticker_result[2].isoformat(),
+                "symbols": self.universe_symbols,
+                "missing_quotes": sorted(
+                    set(self.universe_symbols) - {s.symbol for s in snapshots}
+                ),
+                "missing_details": [s.symbol for s in snapshots if s.detail_updated_at is None],
+            }
             self.status(
                 "Binance Spot",
-                ProviderState.DEGRADED if errors else ProviderState.READY,
+                ProviderState.DEGRADED
+                if errors or len(snapshots) < self.settings.max_altcoins + 1
+                else ProviderState.READY,
                 f"已获取 {len(snapshots)}/{len(selected)} 个现货标的"
                 + (f"；失败：{type(errors[0]).__name__}" if errors else ""),
-                "BTC + USDT 现货成交量前列；名单每小时更新，原始筛选依据保留",
+                "BTC + USDT 现货成交额前列；名单每小时更新，原始筛选依据保留",
             )
             with_futures = [
                 row
@@ -382,6 +420,35 @@ class Providers:
                 "USD-M 合约" if "OKX" not in self.futures_source_used else "USDT 永续合约",
             )
             return []
+
+    async def _quote_asset(self, ticker: dict, common_raw: list[str], details: bool) -> Snapshot:
+        if details:
+            try:
+                result = await self._binance_asset(ticker, common_raw)
+                result.detail_updated_at = result.available_at
+                return result
+            except (ProviderError, ValueError, KeyError, TypeError, IndexError):
+                issue = "DETAIL_COLLECTION_FAILED"
+        else:
+            issue = "DETAIL_NOT_SCHEDULED"
+        # Never attach old indicators to a fresh quote: missing detail means observation only.
+        return Snapshot(
+            asset_id=f"binance:{ticker['symbol']}",
+            symbol=ticker["symbol"],
+            module=Module.BTC if ticker["symbol"] == "BTCUSDT" else Module.ALT,
+            source="Binance",
+            market_time=milliseconds(int(ticker["closeTime"])),
+            available_at=utc_now(),
+            price=float(ticker["lastPrice"]),
+            quote_volume_24h=float(ticker["quoteVolume"]),
+            raw_ids=common_raw,
+            quality_issues=[
+                issue,
+                "INSUFFICIENT_CANDLE_HISTORY",
+                "DEPTH_UNAVAILABLE",
+                "DERIVATIVES_UNAVAILABLE",
+            ],
+        )
 
     async def _binance_asset(self, ticker: dict, common_raw: list[str]) -> Snapshot:
         symbol = ticker["symbol"]
@@ -583,132 +650,8 @@ class Providers:
         return at, ok
 
     async def memes(self) -> list[Snapshot]:
-        try:
-            profiles, profile_raw, _ = await self.get(
-                "DEX Screener", self.settings.dexscreener_url, "/token-profiles/latest/v1"
-            )
-            if not isinstance(profiles, list):
-                raise ProviderError("候选发现接口返回的数据结构不符合预期")
-            universe = [(token.chain, token.address) for token in self.settings.meme_watchlist]
-            universe += [
-                (row["chainId"], row["tokenAddress"])
-                for row in profiles
-                if row.get("chainId") in self.settings.meme_chains
-                and isinstance(row.get("tokenAddress"), str)
-            ]
-            universe = list(dict.fromkeys(universe))[: self.settings.max_memes]
-            results = await asyncio.gather(
-                *(self._meme_asset(chain, address, profile_raw) for chain, address in universe),
-                return_exceptions=True,
-            )
-            snapshots = [row for row in results if isinstance(row, Snapshot)]
-            errors = [row for row in results if isinstance(row, Exception)]
-            self.status(
-                "DEX Screener",
-                ProviderState.DEGRADED if errors else ProviderState.READY,
-                f"候选 {len(universe)} 个，可用池子 {len(snapshots)} 个",
-                "最新 token profiles + 自选地址；非完整新币扫描，存在宣传选择偏差",
-            )
-            return snapshots
-        except (ProviderError, ValueError, KeyError, TypeError) as exc:
-            message = str(exc) if isinstance(exc, ProviderError) else "DEX 响应结构验证失败"
-            self.status(
-                "DEX Screener", ProviderState.UNAVAILABLE, message, "DEX 代币发现与交易池快照"
-            )
-            return []
+        """Retired source; historical records remain readable."""
+        return []
 
     async def _meme_asset(self, chain: str, address: str, profile_raw: str) -> Snapshot | None:
-        if not address.isalnum() or not chain.isalnum():
-            raise ProviderError("代币地址或链标识格式无效")
-        pairs, pair_raw, at = await self.get(
-            "DEX Screener", self.settings.dexscreener_url, f"/token-pairs/v1/{chain}/{address}"
-        )
-        quote_received_at = at
-        if not isinstance(pairs, list):
-            raise ProviderError("交易池数据结构不符合预期")
-
-        def same_address(other: str) -> bool:
-            return other == address if chain == "solana" else other.lower() == address.lower()
-
-        eligible = [
-            p
-            for p in pairs
-            if same_address(p.get("baseToken", {}).get("address", ""))
-            and (number(p.get("priceUsd")) or 0) > 0
-            and p.get("chainId") == chain
-        ]
-        if not eligible:
-            return None
-        pair = max(eligible, key=lambda p: number(p.get("liquidity", {}).get("usd")) or 0)
-        raw_ids = [profile_raw, pair_raw]
-        chain_ids = {"ethereum": "1", "base": "8453", "bsc": "56", "arbitrum": "42161"}
-        risk_data = None
-        if self.settings.enable_goplus and chain in chain_ids:
-            try:
-                response, risk_raw, risk_at = await self.get(
-                    "GoPlus",
-                    self.settings.goplus_url,
-                    f"/api/v1/token_security/{chain_ids[chain]}",
-                    {"contract_addresses": address},
-                )
-                raw_ids.append(risk_raw)
-                at = max(at, risk_at)
-                risk_data = response.get("result", {}).get(address.lower())
-                if isinstance(risk_data, dict) and risk_data:
-                    self.status(
-                        "GoPlus",
-                        ProviderState.READY,
-                        "公开 EVM 合约检查可用",
-                        "部分 EVM 链；返回缺项仍需人工核查，Solana 暂未接入",
-                    )
-                else:
-                    self.status(
-                        "GoPlus",
-                        ProviderState.NEEDS_VERIFICATION,
-                        "接口未提供该地址的有效检查结果",
-                        "EVM 公开检查",
-                    )
-            except (ProviderError, TypeError, KeyError) as exc:
-                message = str(exc) if isinstance(exc, ProviderError) else "风险检查响应无效"
-                self.status("GoPlus", ProviderState.UNAVAILABLE, message, "EVM 公开检查")
-        risk = token_risk(risk_data, chain)
-        volumes = pair.get("volume") or {}
-        volume_5m, volume_1h = number(volumes.get("m5")), number(volumes.get("h1"))
-        # h1 includes m5: subtract it to avoid comparing overlapping windows.
-        baseline = (
-            (volume_1h - volume_5m) / 11
-            if volume_1h is not None and volume_5m is not None and volume_1h > volume_5m
-            else None
-        )
-        transactions = (pair.get("txns") or {}).get("m5") or {}
-        created_at = milliseconds(pair["pairCreatedAt"]) if pair.get("pairCreatedAt") else None
-        features = Features(
-            return_5m_pct=number((pair.get("priceChange") or {}).get("m5")),
-            return_1h_pct=number((pair.get("priceChange") or {}).get("h1")),
-            relative_volume=volume_5m / baseline if baseline and volume_5m is not None else None,
-            liquidity_usd=number((pair.get("liquidity") or {}).get("usd")),
-            volume_1h_usd=volume_1h,
-            buys_5m=transactions.get("buys"),
-            sells_5m=transactions.get("sells"),
-            pool_age_hours=max(0, (at - created_at).total_seconds() / 3600)
-            if created_at and created_at <= at
-            else None,
-        )
-        canonical_address = address if chain == "solana" else address.lower()
-        return Snapshot(
-            asset_id=f"dex:{chain}:{canonical_address}:{pair['pairAddress']}",
-            symbol=pair["baseToken"].get("symbol") or address[:8],
-            module=Module.MEME,
-            source="DEX Screener",
-            chain=chain,
-            address=canonical_address,
-            pair_address=pair["pairAddress"],
-            market_time=quote_received_at,
-            available_at=at,
-            price=float(pair["priceUsd"]),
-            quote_volume_24h=number(volumes.get("h24")),
-            features=features,
-            risk=risk,
-            raw_ids=raw_ids,
-            quality_issues=["QUOTE_TIME_UNVERIFIED", "PROFILE_DISCOVERY_BIAS"],
-        )
+        return None

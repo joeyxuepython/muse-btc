@@ -26,7 +26,7 @@
           <span>↗</span>山寨币雷达
         </button>
         <button class="nav-item" data-view="MEME">
-          <span>◎</span>Meme 发现
+          <span>◎</span>DEX 历史归档
         </button>
         <button class="nav-item" data-view="SIGNALS">
           <span>⌁</span>提醒记录
@@ -53,7 +53,7 @@
           <option value="ALL">市场总览</option>
           <option value="BTC">BTC 研判</option>
           <option value="ALT">山寨币雷达</option>
-          <option value="MEME">Meme 发现</option>
+          <option value="MEME">DEX 历史归档</option>
           <option value="SIGNALS">提醒记录</option>
           <option value="VALIDATION">历史验证</option>
         </select>
@@ -89,11 +89,11 @@
             <div class="metric-caption">按公开现货成交量筛选</div>
           </article>
           <article class="metric">
-            <div class="metric-label">Meme 候选<span>◎</span></div>
+            <div class="metric-label">现货报价覆盖<span>◎</span></div>
             <div class="metric-value">
-              <span id="meme-count">0</span><small>个池子</small>
+              <span id="meme-count">0</span><small>个交易对</small>
             </div>
-            <div class="metric-caption">DEX 发现与合约风险核查</div>
+            <div class="metric-caption">目标 BTC + 99 个 USDT 现货</div>
           </article>
           <article class="metric">
             <div class="metric-label">有效提醒<span>⌁</span></div>
@@ -115,14 +115,14 @@
           <div class="panel-heading">
             <div>
               <h2>市场监控</h2>
-              <span id="universe-caption">BTC · 山寨币 · Meme</span>
+              <span id="universe-caption">BTC · USDT 现货 · DEX 历史已归档</span>
             </div>
             <div class="table-controls">
               <div class="tabs" role="group" aria-label="标的筛选">
                 <button class="selected" data-filter="ALL">全部</button
                 ><button data-filter="BTC">BTC</button
                 ><button data-filter="ALT">山寨币</button
-                ><button data-filter="MEME">Meme</button>
+                ><button data-filter="MEME">DEX 历史</button>
               </div>
               <label class="search"
                 ><span>⌕</span
@@ -183,9 +183,9 @@
             <div class="panel-heading">
               <div>
                 <h2>BTC 风险联动</h2>
-                <span>影响山寨币与 Meme 的入场条件</span>
+                <span>影响 USDT 现货的入场条件</span>
               </div>
-              <span class="tiny-label">BTC → ALT / MEME</span>
+              <span class="tiny-label">BTC → ALT</span>
             </div>
             <div class="regime-body">
               <div class="regime-line">

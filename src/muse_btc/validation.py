@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from itertools import groupby
 
 from .config import Settings
-from .models import Outcome, Signal, SignalKind, Snapshot
+from .models import Module, Outcome, Signal, SignalKind, Snapshot
 from .rules import RULE_VERSION, evaluate, market_regime, usable
 from .storage import Store
 
@@ -74,7 +74,7 @@ def validate_pending(store: Store, now: datetime, settings: Settings) -> int:
     completed = {(o.signal_id, o.horizon_seconds) for o in store.outcomes()}
     count = 0
     for signal in store.signals(limit=100000, as_of=now):
-        if signal.kind == SignalKind.INVALIDATED:
+        if signal.module == Module.MEME or signal.kind == SignalKind.INVALIDATED:
             continue
         for horizon in HORIZONS:
             if (signal.id, horizon) not in completed:

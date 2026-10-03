@@ -44,14 +44,9 @@ class Collector:
                     name=name, state=ProviderState.DISABLED, message="首版未启用", coverage=coverage
                 )
             )
-        if not self.settings.enable_goplus:
-            self.providers.status("GoPlus", ProviderState.DISABLED, "配置中未启用", "EVM 公开检查")
-        elif not any(s.name == "GoPlus" for s in self.store.statuses()):
+        for name in ("DEX Screener", "GoPlus"):
             self.providers.status(
-                "GoPlus",
-                ProviderState.NEEDS_VERIFICATION,
-                "等待可用 EVM 候选与接口检查",
-                "EVM 公开检查",
+                name, ProviderState.DISABLED, "已停止新采集、分析和提醒；保留历史", "历史归档"
             )
 
     async def start(self) -> None:
@@ -78,13 +73,11 @@ class Collector:
             return {"status": "BUSY", "message": "采集正在进行，请等待本轮结束"}
         async with self.lock:
             try:
-                binance, memes = await asyncio.gather(
-                    self.providers.binance(), self.providers.memes()
-                )
+                binance = await self.providers.binance()
                 now = utc_now()
                 btc = next((s for s in binance if s.module == Module.BTC), None)
                 saved = []
-                for snapshot in binance + memes:
+                for snapshot in binance:
                     snapshot.decision_at = now
                     if (
                         snapshot.module == Module.ALT
@@ -123,6 +116,8 @@ class Collector:
         count = 0
         by_asset = {s.asset_id: s for s in snapshots}
         for old in self.store.signals(limit=100000, as_of=now):
+            if old.module == Module.MEME:
+                continue
             if old.kind not in (SignalKind.WATCH, SignalKind.ENTRY_CANDIDATE):
                 continue
             events = self.store.signal_events(old.id)
@@ -208,6 +203,9 @@ def signal_view(
     if signal.kind == SignalKind.ENTRY_CANDIDATE:
         regime = market_regime(current_assets.get("binance:BTCUSDT"), now, settings)
         data_current = data_current and regime.risk_mode == "NORMAL"
+    if signal.module == Module.MEME:
+        data_current = False
+        state = "ARCHIVED"
     result["data_current"] = data_current
     if (
         state == "ACTIVE"

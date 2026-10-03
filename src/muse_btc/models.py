@@ -111,6 +111,7 @@ class Snapshot(Record):
     raw_ids: list[str] = []
     quality_issues: list[str] = []
     candles: list[Candle] = []
+    detail_updated_at: AwareDatetime | None = None
     feature_version: str = "features-v1"
 
 

@@ -24,6 +24,7 @@ const kinds = {
   INVALIDATED: "已失效",
 };
 const states = {
+  ARCHIVED: "历史归档",
   ACTIVE: "有效",
   EXPIRED: "已到期",
   INVALIDATED: "已失效",
@@ -103,7 +104,7 @@ function sparkline(values) {
   return `<svg class="sparkline" viewBox="0 0 76 24" role="img" aria-label="已归档价格走势"><polyline points="${points}" fill="none" stroke="${values.at(-1) >= values[0] ? "#7bceb6" : "#f18e8c"}" stroke-width="1.3"/></svg>`;
 }
 function assetRisk(asset) {
-  if (!asset.data_usable) return tag("过期 / 质量不足", "warning");
+  if (!asset.data_usable) return tag("仅观察 · 数据不足或过期", "warning");
   if (asset.risk?.blockers?.length) return tag("风险阻断", "danger");
   if (asset.risk?.status === "NEEDS_VERIFICATION")
     return tag("风险待核实", "warning");
@@ -115,7 +116,7 @@ function renderAssets() {
   const query = $("#search").value.toLowerCase().trim();
   const items = overview.assets.filter(
     (a) =>
-      (filter === "ALL" || a.module === filter) &&
+      (filter === "MEME" ? a.module === "MEME" : a.module !== "MEME" && (filter === "ALL" || a.module === filter)) &&
       `${a.symbol} ${a.address || ""} ${a.asset_id}`
         .toLowerCase()
         .includes(query),
@@ -136,7 +137,7 @@ function renderAssets() {
             ? f.buys_5m / (f.buys_5m + f.sells_5m)
             : null
           : f.spot_taker_buy_ratio;
-      return `<tr data-asset="${escapeHtml(a.asset_id)}" class="${a.data_usable ? "" : "asset-stale"}" tabindex="0"><td><div class="asset-name"><span class="coin-avatar ${a.module.toLowerCase()}">${a.module === "BTC" ? "₿" : escapeHtml(a.symbol[0])}</span><div><strong>${escapeHtml(a.symbol)}</strong><small>${escapeHtml(a.chain || a.source)} · ${a.module}</small></div></div></td><td>${price(a.price)}</td><td class="${cls(f.return_5m_pct)}">${pct(f.return_5m_pct)}</td><td>${f.relative_volume != null ? format(f.relative_volume) + "×" : "—"}</td><td>${buy != null ? format(buy * 100, 0) + "%" : "—"}${a.module === "MEME" ? '<small class="muted"> 笔数</small>' : ""}</td><td>${f.funding_rate_pct != null ? format(f.funding_rate_pct, 4) + "%" : "—"}</td><td>${a.module === "MEME" ? "池龄 " + (f.pool_age_hours != null ? format(f.pool_age_hours, 1) + "h" : "未知") : sparkline(a.trend)}</td><td>${assetRisk(a)}</td></tr>`;
+      return `<tr data-asset="${escapeHtml(a.asset_id)}" class="${a.data_usable ? "" : "asset-stale"}" tabindex="0"><td><div class="asset-name"><span class="coin-avatar ${a.module.toLowerCase()}">${a.module === "BTC" ? "₿" : escapeHtml(a.symbol[0])}</span><div><strong>${escapeHtml(a.symbol)}</strong><small>${escapeHtml(a.chain || a.source)} · ${a.module}</small></div></div></td><td>${price(a.price)}</td><td class="${cls(f.return_5m_pct)}">${pct(f.return_5m_pct)}</td><td>${f.relative_volume != null ? format(f.relative_volume) + "×" : "—"}</td><td>${buy != null ? format(buy * 100, 0) + "%" : "—"}${a.module === "MEME" ? '<small class="muted"> 笔数</small>' : ""}</td><td>${f.funding_rate_pct != null ? format(f.funding_rate_pct, 4) + "%" : "—"}</td><td>${a.module === "MEME" ? "池龄 " + (f.pool_age_hours != null ? format(f.pool_age_hours, 1) + "h" : "未知") : sparkline(a.trend)}</td><td>${assetRisk(a)}<small>报价 ${time(a.market_time)} · 详细 ${time(a.detail_updated_at)} · 24h成交额 ${price(a.quote_volume_24h)}</small><small>${escapeHtml(a.quality_issues.join(" · "))}</small></td></tr>`;
     })
     .join("");
   $("#empty-assets").hidden = items.length > 0;
@@ -171,9 +172,9 @@ function renderOverview() {
   $("#alt-count").textContent = overview.assets.filter(
     (a) => a.module === "ALT" && a.data_usable,
   ).length;
-  $("#meme-count").textContent = overview.assets.filter(
-    (a) => a.module === "MEME" && a.data_usable,
-  ).length;
+  const coverage = overview.coverage || {};
+  $("#meme-count").textContent = `${coverage.quotes || 0}/${coverage.target || 100}`;
+  $("#universe-caption").textContent = `报价覆盖 ${coverage.quotes || 0}/${coverage.target || 100} · 本轮详细数据 ${coverage.details || 0} · 更新 ${time(coverage.updated_at)} · 缺失报价 ${(coverage.missing_quotes || []).join(", ") || "无"}`;
   $("#signal-count").textContent = overview.signals.filter(
     (s) => s.state === "ACTIVE" && s.kind !== "INVALIDATED",
   ).length;
@@ -200,7 +201,7 @@ function renderOverview() {
   $("#connection").textContent = "工作台已连接";
   $("#connection").classList.add("online");
   const required = overview.providers.filter((p) =>
-    ["Binance Spot", "DEX Screener"].includes(p.name),
+    ["Binance Spot"].includes(p.name),
   );
   if (required.some((p) => p.state === "UNAVAILABLE"))
     notice(
@@ -311,7 +312,7 @@ function changeView(next) {
     ALL: "市场总览",
     BTC: "BTC 研判",
     ALT: "山寨币雷达",
-    MEME: "Meme 发现",
+    MEME: "DEX 历史归档",
     SIGNALS: "提醒记录",
     VALIDATION: "历史验证",
   };

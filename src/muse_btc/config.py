@@ -14,13 +14,14 @@ class Settings(BaseSettings):
 
     database_path: Path = Path("data/muse.db")
     poll_seconds: int = Field(default=120, ge=30, le=3600)
-    max_altcoins: int = Field(default=8, ge=1, le=30)
+    max_altcoins: int = Field(default=99, ge=1, le=99)
+    detail_batch_size: int = Field(default=20, ge=1, le=99)
     universe_refresh_seconds: int = Field(default=3600, ge=300, le=86400)
     max_memes: int = Field(default=8, ge=1, le=30)
     meme_chains: list[str] = ["ethereum", "base", "solana"]
     meme_watchlist: list[WatchedToken] = []
     enable_collector: bool = True
-    enable_goplus: bool = True
+    enable_goplus: bool = False
     stale_seconds: int = Field(default=300, ge=60, le=3600)
     alert_cooldown_seconds: int = Field(default=3600, ge=60)
     request_timeout_seconds: float = Field(default=12, ge=1, le=60)

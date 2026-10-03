@@ -21,9 +21,7 @@ def test_futures_source_rejects_unknown_value(settings):
     import pydantic
 
     with pytest.raises(pydantic.ValidationError):
-        settings.__class__(
-            database_path=settings.database_path, futures_source="cme"
-        )
+        settings.__class__(database_path=settings.database_path, futures_source="cme")
 
 
 def okx_fixture(request: httpx.Request) -> httpx.Response:
@@ -64,7 +62,9 @@ async def test_okx_derivatives_populate_funding_basis_and_oi(settings, store):
     from muse_btc.models import ProviderState, ProviderStatus
 
     store.save_status(
-        ProviderStatus(name="Binance Futures", state=ProviderState.UNAVAILABLE, message="old", coverage="old")
+        ProviderStatus(
+            name="Binance Futures", state=ProviderState.UNAVAILABLE, message="old", coverage="old"
+        )
     )
     providers = Providers(settings, store, transport=httpx.MockTransport(okx_fixture))
     try:
@@ -149,9 +149,7 @@ async def test_auto_falls_back_to_okx_when_binance_blocked(settings, store):
 @pytest.mark.asyncio
 async def test_auto_prefers_binance_when_available(settings, store):
     settings.futures_source = "auto"
-    providers = Providers(
-        settings, store, transport=httpx.MockTransport(okx_fixture)
-    )
+    providers = Providers(settings, store, transport=httpx.MockTransport(okx_fixture))
     try:
         snapshots = await providers.binance()
         # Binance fixture 提供 premiumIndex/openInterestHist，走 Binance 路径

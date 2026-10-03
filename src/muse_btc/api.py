@@ -73,7 +73,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
         now = utc_now()
         snapshots = store.latest_snapshots(now)
         statuses = {s.name: s for s in store.statuses()}
-        required = ["Binance Spot", "DEX Screener"]
+        required = ["Binance Spot"]
         available = all(
             name in statuses
             and statuses[name].state == ProviderState.READY
@@ -81,13 +81,26 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             for name in required
         )
         btc = next((s for s in snapshots if s.asset_id == "binance:BTCUSDT"), None)
-        if not available or not btc or not usable(btc, now, config):
+        fresh_quotes = [
+            s
+            for s in snapshots
+            if s.symbol in providers.universe_symbols
+            and s.source == "Binance"
+            and s.market_time <= now
+            and (now - s.market_time).total_seconds() <= config.stale_seconds
+        ]
+        if (
+            not available
+            or not btc
+            or not usable(btc, now, config)
+            or len(fresh_quotes) < config.max_altcoins + 1
+        ):
             return JSONResponse({"status": "degraded", "market_data_ready": False}, status_code=503)
         derivatives = statuses.get("OKX Futures") or statuses.get("Binance Futures")
         return {
             "status": "ready",
             "market_data_ready": True,
-            "scope": "SPOT_AND_DEX_MONITORING",
+            "scope": "USDT_SPOT_MONITORING",
             "derivatives_ready": bool(
                 derivatives
                 and derivatives.state == ProviderState.READY
@@ -101,10 +114,18 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
         snapshots = store.latest_snapshots(now)
         btc = next((s for s in snapshots if s.asset_id == "binance:BTCUSDT"), None)
         assets = []
+        active_symbols = set(providers.universe_symbols)
         for snapshot in snapshots:
+            if (
+                active_symbols
+                and snapshot.source == "Binance"
+                and snapshot.symbol not in active_symbols
+            ):
+                continue
             item = snapshot.model_dump(mode="json", exclude={"candles"})
             item["age_seconds"] = max(0, (now - snapshot.available_at).total_seconds())
             item["data_usable"] = usable(snapshot, now, config)
+            item["monitoring_active"] = snapshot.module != "MEME"
             item["trend"] = [c.close for c in snapshot.candles[-60:]]
             assets.append(item)
         statuses = []
@@ -116,6 +137,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
                 item["message"] = "检查结果已过期，等待本轮重新验证"
             statuses.append(item)
         return {
+            "coverage": providers.coverage,
             "as_of": now.isoformat(),
             "regime": market_regime(btc, now, config),
             "assets": assets,

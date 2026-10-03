@@ -121,7 +121,7 @@ async def test_public_adapters_normalize_all_three_modules_and_keep_lineage(sett
         cex = await providers.binance()
         memes = await providers.memes()
         assert len(cex) == 3
-        assert {s.module for s in cex + memes} == {"BTC", "ALT", "MEME"}
+        assert {s.module for s in cex + memes} == {"BTC", "ALT"}
         assert not any(s.symbol == "USDCUSDT" for s in cex)
         assert cex[0].features.funding_rate_pct == pytest.approx(0.01)
         assert cex[0].features.oi_change_5m_pct == pytest.approx(1)
@@ -130,8 +130,7 @@ async def test_public_adapters_normalize_all_three_modules_and_keep_lineage(sett
         assert "OKX" in providers.futures_source_used
         statuses = {s.name: s.state for s in store.statuses()}
         assert statuses["OKX Futures"] == "READY"
-        assert memes[0].risk.status == "BLOCKED"
-        assert memes[0].features.relative_volume == pytest.approx(5.5)
+        assert memes == []
         for snap in cex + memes:
             assert snap.raw_ids
             assert all(store.raw(raw_id) for raw_id in snap.raw_ids)
@@ -211,9 +210,10 @@ def test_api_collection_dashboard_details_export_and_validation(settings):
         assert client.get("/static/app.js").status_code == 200
         result = client.post("/api/collect").json()
         assert result["status"] == "COMPLETE"
-        assert result["snapshots"] == 4
+        assert result["snapshots"] == 3
         overview = client.get("/api/overview").json()
-        assert {a["module"] for a in overview["assets"]} == {"BTC", "ALT", "MEME"}
+        assert {a["module"] for a in overview["assets"]} == {"BTC", "ALT"}
+        assert overview["coverage"]["quotes"] == 3
         assert overview["signals"]
         signal = overview["signals"][0]
         detail = client.get(f"/api/signals/{signal['id']}").json()
