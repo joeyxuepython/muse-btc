@@ -14,7 +14,7 @@
 
 ## 云端执行
 
-从 `feat/v4-phase2-6` 分支更新并安装，按 [cloud-run.md](cloud-run.md) 配置数据库和访问口令。无需购买上述 API 或添加付费 Token。
+从 `main` 更新并安装（本次可靠性升级合并后，可按[升级说明](reliability-upgrade.md)启用云端 worker），按 [cloud-run.md](cloud-run.md) 配置数据库和访问口令。无需购买上述 API 或添加付费 Token。
 
 ```bash
 .venv/bin/muse free-data --scope onchain

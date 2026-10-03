@@ -130,7 +130,7 @@ async def test_onchain_archive_delay_cache_and_no_research(store, settings, now,
         assert len(IntelligenceStore(store).records("onchain", now, latest=False)) == 9
         assert IntelligenceStore(store).checks() == []
         with store.connect() as db:
-            assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+            assert db.execute("PRAGMA user_version").fetchone()[0] == 4
     finally:
         await providers.close()
 

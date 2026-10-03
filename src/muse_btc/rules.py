@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from .config import Settings
 from .models import Module, Regime, Signal, SignalKind, Snapshot
 
-RULE_VERSION = "rules-v4-1"
+RULE_VERSION = "rules-v4-2"
 
 
 def component_usable(snapshot: Snapshot, name: str, now: datetime, settings: Settings) -> bool:
@@ -285,6 +285,8 @@ def evaluate(snapshot: Snapshot, regime: Regime, now: datetime, settings: Settin
         )
     if f.funding_rate_pct is None or f.oi_change_5m_pct is None or f.spread_bps is None:
         for signal in result:
+            if signal.kind == SignalKind.RISK:
+                continue
             signal.kind = SignalKind.WATCH
             signal.entry_zone = None
             signal.contradictions.append("数据覆盖不足，仅供观察")

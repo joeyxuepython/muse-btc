@@ -9,6 +9,7 @@ import uvicorn
 from .btc_data import BTCDataEngine
 from .config import Settings
 from .context import import_context
+from .events import EventEngine
 from .experiments import ranking_report, train_model
 from .intelligence import ContextInput, IntelligenceStore
 from .macro import MacroEngine
@@ -19,6 +20,7 @@ from .service import Collector
 from .social import SocialEngine
 from .storage import Store
 from .validation import replay, validate_pending, validation_report
+from .worker import IntelligenceWorker, runtime_health
 
 
 def parse_time(value: str) -> datetime:
@@ -43,6 +45,8 @@ async def intelligence_once(settings, store, scope, sources=None):
     try:
         if scope == "research":
             return await ResearchEngine(store, settings, providers.public).check(sources)
+        if scope == "events":
+            return await EventEngine(store, settings, providers.public).collect()
         if scope == "macro":
             return await MacroEngine(store, settings, providers.public).collect()
         if scope == "btc":
@@ -78,7 +82,7 @@ def main() -> None:
     backtest.add_argument("--end", required=True, type=parse_time)
     intelligence = sub.add_parser("intelligence", help="手动采集扩展来源，不创建定时任务")
     intelligence.add_argument(
-        "--scope", required=True, choices=["macro", "meme", "social", "research", "btc"]
+        "--scope", required=True, choices=["macro", "events", "meme", "social", "research", "btc"]
     )
     intelligence.add_argument(
         "--sources",
@@ -101,6 +105,12 @@ def main() -> None:
     train = sub.add_parser("train", help="按时间分割与隔离标签窗口训练研究模型")
     train.add_argument("--horizon", type=int, default=14400, choices=[14400, 86400, 259200, 604800])
     sub.add_parser("framework", help="检查数据库与模块框架；不采集网络数据")
+    sub.add_parser("worker", help="在当前进程持续采集配置的扩展来源")
+    sub.add_parser("runtime", help="查看采集心跳、失败和最近成功记录")
+    backup = sub.add_parser("backup", help="创建 SQLite 在线一致性备份")
+    backup.add_argument("path", type=Path)
+    sub.add_parser("storage-report", help="查看存储增长；保留原始证据")
+    sub.add_parser("research-queue", help="供 Muse 已有邮件/分析流程获取待处理研究")
     args = parser.parse_args()
     settings = Settings()
     if args.command == "serve":
@@ -111,7 +121,35 @@ def main() -> None:
         uvicorn.run(create_app(settings), host=args.host, port=args.port)
         return
     store = Store(settings.database_path)
-    if args.command == "collect":
+    if args.command == "worker":
+
+        async def run_worker():
+            providers = Providers(settings, store)
+            try:
+                return await IntelligenceWorker(store, settings, providers).run()
+            finally:
+                await providers.close()
+
+        try:
+            asyncio.run(run_worker())
+        except KeyboardInterrupt:
+            pass
+    elif args.command == "backup":
+        if args.path.exists() or args.path.resolve() == store.path.resolve():
+            parser.error("备份目标必须是尚不存在的新路径")
+        store.backup(args.path)
+        print(json.dumps({"status": "COMPLETE", "path": str(args.path)}))
+    elif args.command == "storage-report":
+        print(json.dumps(store.diagnostics(), indent=2))
+    elif args.command == "runtime":
+        print(json.dumps(runtime_health(store, utc_now()), indent=2))
+    elif args.command == "research-queue":
+        print(
+            json.dumps(
+                ResearchEngine(store, settings, None).queue(utc_now()), ensure_ascii=False, indent=2
+            )
+        )
+    elif args.command == "collect":
         result = asyncio.run(collect_once(settings, store))
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if result["status"] not in ("COMPLETE", "BUSY"):

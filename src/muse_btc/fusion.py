@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 
 from .context import asset_context
-from .intelligence import IntelligenceStore
+from .intelligence import IntelligenceStore, digest
 from .models import Module, SignalKind
 from .rules import _signal, component_usable, usable
 
@@ -22,7 +22,23 @@ def enrich_rankings(rows, snapshots, store, now, settings):
         "order_book": "depth_imbalance",
         "volatility": "realized_volatility_pct",
     }
+    comparison_basis = digest(
+        {
+            "members": sorted(
+                (
+                    r["asset_id"],
+                    r["data_ready"],
+                    sorted(r.get("missing", [])),
+                    r.get("coverage_pct"),
+                )
+                for r in rows
+            ),
+            "weights": settings.ranking_weights,
+        }
+    )
     for row in rows:
+        row["rank_comparison_basis"] = comparison_basis
+        row["rank_change_comparable"] = False
         context = asset_context(archive, row["asset_id"], now)
         row["context"] = context
         row["component_ranks"] = {}
@@ -39,9 +55,17 @@ def enrich_rankings(rows, snapshots, store, now, settings):
 
             prior = json.loads(old[0])
             hours = (now - datetime.fromisoformat(old[1])).total_seconds() / 3600
-            if hours > 0 and row["data_ready"] and prior["data_ready"]:
+            comparable = comparison_basis == prior.get("rank_comparison_basis")
+            row["rank_change_comparable"] = comparable
+            if not comparable:
+                row["rank_change"] = None
+                row["score_delta"] = None
+            if hours > 0 and row["data_ready"] and prior["data_ready"] and comparable:
                 row["rank_velocity_per_hour"] = (prior["rank"] - row["rank"]) / hours
-        row["version"] = "rank-v4-3"
+        if not row["rank_change_comparable"]:
+            row["rank_change"] = None
+            row["score_delta"] = None
+        row["version"] = "rank-v4-4"
         row["threshold_version"] = settings.threshold_version
     for name, field in factors.items():
         values = []

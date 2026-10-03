@@ -95,6 +95,7 @@ def ranking_report(store, now, settings):
     for horizon in RANK_HORIZONS:
         for topk in (5, 10, 20):
             hits, measured, pending, missing, days = 0, [], 0, 0, 0
+            daily_returns, baseline_returns = [], []
             for at, rows in daily.values():
                 selected = rows[:topk]
                 labels = [forward_label(store, row, at, horizon, now, settings) for row in selected]
@@ -106,6 +107,15 @@ def ranking_report(store, now, settings):
                 if not complete:
                     continue
                 days += 1
+                daily_returns.append(statistics.mean(label["return_pct"] for label in labels))
+                all_labels = [forward_label(store, row, at, horizon, now, settings) for row in rows]
+                if all(label["status"] == "MEASURED" for label in all_labels):
+                    baseline_returns.append(
+                        (
+                            daily_returns[-1],
+                            statistics.mean(label["return_pct"] for label in all_labels),
+                        )
+                    )
                 measured += [label["return_pct"] for label in labels]
                 hits += sum(
                     label["return_pct"] >= settings.ranking_hit_threshold_pct for label in labels
@@ -121,6 +131,25 @@ def ranking_report(store, now, settings):
                     "precision_at_k": hits / len(measured) if measured else None,
                     "mean_return_pct": statistics.mean(measured) if measured else None,
                     "hit_threshold_pct": settings.ranking_hit_threshold_pct,
+                    "net_return_scenarios": [
+                        {
+                            "round_trip_cost_bps": cost,
+                            "mean_net_return_pct": statistics.mean(measured) - cost / 100
+                            if measured
+                            else None,
+                        }
+                        for cost in (
+                            2 * (settings.fee_bps_each_way + settings.slippage_bps_each_way),
+                            4 * (settings.fee_bps_each_way + settings.slippage_bps_each_way),
+                        )
+                    ],
+                    "matched_universe_baseline_days": len(baseline_returns),
+                    "mean_excess_vs_equal_weight_universe_pct": statistics.mean(
+                        a - b for a, b in baseline_returns
+                    )
+                    if baseline_returns
+                    else None,
+                    "daily_return_bootstrap_95pct": bootstrap_interval(daily_returns),
                 }
             )
     signals = store.signals(limit=100000, as_of=now)
@@ -177,6 +206,20 @@ def ranking_report(store, now, settings):
             "完整 TopK 组才进入 Precision 分母",
             "重复提醒相关；报告不证明可盈利",
         ],
+    }
+
+
+def bootstrap_interval(values):
+    if len(values) < 20:
+        return {"status": "INSUFFICIENT_DAYS", "days": len(values), "interval": None}
+    rng = random.Random(42)
+    # Day-level blocks retain the within-day cross-sectional correlation.
+    means = sorted(statistics.mean(rng.choices(values, k=len(values))) for _ in range(1000))
+    return {
+        "status": "EXPLORATORY",
+        "days": len(values),
+        "interval": [means[24], means[974]],
+        "limitation": "Resampling days does not remove multi-day serial dependence",
     }
 
 

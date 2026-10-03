@@ -2,9 +2,11 @@ import statistics
 from datetime import datetime, timedelta
 from itertools import groupby
 
+from .btc_intelligence import apply_btc_context
 from .config import Settings
+from .decisions import decide
 from .models import Module, Outcome, Signal, SignalKind, Snapshot
-from .rules import RULE_VERSION, evaluate, market_regime, quote_usable
+from .rules import RULE_VERSION, market_regime, quote_usable
 from .storage import Store
 
 HORIZONS = (300, 900, 3600, 14400, 86400, 259200, 604800, 1209600, 2592000)
@@ -13,6 +15,9 @@ HORIZONS = (300, 900, 3600, 14400, 86400, 259200, 604800, 1209600, 2592000)
 def measure_signal(
     store: Store, signal: Signal, horizon: int, now: datetime, settings: Settings
 ) -> Outcome | None:
+    recorded = store.decision_config(signal.emitted_at)
+    if recorded:
+        settings = settings.model_copy(update=recorded)
     target = signal.emitted_at + timedelta(seconds=horizon)
     if target > now:
         return None
@@ -146,11 +151,15 @@ def replay(store: Store, start: datetime, end: datetime, settings: Settings) -> 
     cooldowns: dict[tuple[str, str, str], datetime] = {}
     signals: list[Signal] = []
     skipped = 0
+    legacy_config_batches = 0
     archived = store.snapshot_range(start - timedelta(seconds=settings.stale_seconds), end)
     archived = [s for s in archived if start <= (s.decision_at or s.available_at) <= end]
     archived.sort(key=lambda s: s.decision_at or s.available_at)
     # Reproduce the collection barrier: all evidence is available before decisions.
     for as_of, group in groupby(archived, key=lambda s: s.decision_at or s.available_at):
+        recorded = store.decision_config(as_of)
+        config = settings.model_copy(update=recorded) if recorded else settings
+        legacy_config_batches += int(recorded is None)
         batch = []
         membership = store.universe(as_of)
         allowed = (
@@ -168,15 +177,14 @@ def replay(store: Store, start: datetime, end: datetime, settings: Settings) -> 
                 raise ValueError("Archived snapshot contains future evidence")
             latest[snapshot.asset_id] = snapshot
             batch.append(snapshot)
-        regime = market_regime(latest.get("binance:BTCUSDT"), as_of, settings)
+        regime = market_regime(latest.get("binance:BTCUSDT"), as_of, config)
+        if config.enable_intelligence:
+            regime = apply_btc_context(regime, store, config, as_of, latest.get("binance:BTCUSDT"))
         for snapshot in batch:
-            for signal in evaluate(snapshot, regime, as_of, settings):
+            for signal in decide(snapshot, regime, as_of, config, store):
                 key = (signal.asset_id, signal.rule_id, signal.kind)
                 previous = cooldowns.get(key)
-                if (
-                    previous
-                    and (as_of - previous).total_seconds() < settings.alert_cooldown_seconds
-                ):
+                if previous and (as_of - previous).total_seconds() < config.alert_cooldown_seconds:
                     continue
                 signals.append(signal)
                 cooldowns[key] = as_of
@@ -194,6 +202,8 @@ def replay(store: Store, start: datetime, end: datetime, settings: Settings) -> 
         "signal_count": len(signals),
         "outcome_count": len(outcomes),
         "skipped_feature_versions": skipped,
+        "legacy_config_batches": legacy_config_batches,
+        "config_policy": "ARCHIVED_WHEN_PRESENT_OTHERWISE_EXPLICIT_CURRENT_FALLBACK",
         "signals": [s.model_dump(mode="json") for s in signals],
         "outcomes": [o.model_dump(mode="json") for o in outcomes],
         "limitations": [
