@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     database_path: Path = Path("data/muse.db")
     poll_seconds: int = Field(default=120, ge=30, le=3600)
     max_altcoins: int = Field(default=100, ge=1, le=100)
-    detail_batch_size: int = Field(default=20, ge=1, le=100)
+    detail_batch_size: int = Field(default=100, ge=1, le=100)
     universe_refresh_seconds: int = Field(default=86400, ge=300, le=86400)
     universe_max_replacements: int = Field(default=10, ge=0, le=100)
     pinned_symbols: list[str] = []
@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     goplus_url: str = "https://api.gopluslabs.io"
     fee_bps_each_way: float = Field(default=10, ge=0)
     slippage_bps_each_way: float = Field(default=5, ge=0)
-    # Research is checked on demand; these switches never create a scheduled task.
+    # Application collection is opt-in; these switches never create a Codex scheduled task.
     enable_intelligence: bool = True
     enable_meme_discovery: bool = False
     enable_social: bool = False
@@ -101,6 +101,12 @@ class Settings(BaseSettings):
         "RRPONTSYD",
         "WRESBAL",
     ]
+    enable_background_intelligence: bool = False
+    background_scopes: list[str] = ["macro", "events", "onchain", "options"]
+    worker_tick_seconds: int = Field(default=30, ge=5, le=300)
+    event_refresh_seconds: int = Field(default=300, ge=60)
+    event_reaction_tolerance_seconds: int = Field(default=30, ge=1, le=60)
+    macro_series_max_age_days: dict[str, int] = {"GDPC1": 150, "WALCL": 14, "WTREGEN": 14}
     macro_stale_days: int = Field(default=45, ge=1, le=180)
     intelligence_refresh_seconds: int = Field(default=3600, ge=300)
     research_max_documents: int = Field(default=100, ge=1, le=300)
@@ -115,7 +121,7 @@ class Settings(BaseSettings):
     stablecoins_url: str = "https://stablecoins.llama.fi"
     fred_url: str = "https://fred.stlouisfed.org"
     etf_url: str = "https://farside.co.uk/btc/"
-    # Free BTC data are collected only by an explicit CLI/API request.
+    # Free BTC collection can be invoked explicitly or enabled in the cloud worker.
     coinmetrics_url: str = "https://community-api.coinmetrics.io/v4"
     bgeometrics_url: str = "https://bitcoin-data.com/v1"
     deribit_url: str = "https://www.deribit.com/api/v2"
@@ -124,6 +130,7 @@ class Settings(BaseSettings):
     btc_options_refresh_seconds: int = Field(default=300, ge=60)
     deribit_greeks_limit: int = Field(default=12, ge=0, le=40)
     x_bearer_token: SecretStr | None = None
+    social_max_pages: int = Field(default=3, ge=1, le=10)
     x_query: str = "(BTC OR ETH OR crypto) -is:retweet lang:en"
     meme_discovery_batch_size: int = Field(default=20, ge=1, le=100)
     breakout_threshold_pct: float = Field(default=3, gt=0)
@@ -131,6 +138,13 @@ class Settings(BaseSettings):
     ml_min_samples: int = Field(default=200, ge=40)
     rule_thresholds: dict[str, float] = DEFAULT_THRESHOLDS
     threshold_version: str = "thresholds-v4-2"
+
+    @field_validator("background_scopes")
+    @classmethod
+    def valid_scopes(cls, values):
+        if set(values) - {"macro", "events", "onchain", "options", "research", "social"}:
+            raise ValueError("Unsupported background scope")
+        return list(dict.fromkeys(values))
 
     @field_validator("macro_series")
     @classmethod

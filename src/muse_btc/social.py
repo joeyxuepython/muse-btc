@@ -3,7 +3,7 @@
 import re
 import statistics
 from collections import Counter
-from datetime import timedelta
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 
 import httpx
@@ -50,50 +50,116 @@ class SocialEngine:
         token = self.archive.acquire("social", utc_now(), 300)
         if not token:
             return {"status": "BUSY"}
+        count = 0
         try:
-            response = await self.providers.client.get(
-                "https://api.x.com/2/tweets/search/recent",
-                params={
+            now = utc_now()
+            checkpoint = self.store.state("social_checkpoint") or {}
+            if checkpoint.get("query") != self.settings.x_query:
+                checkpoint = {}
+            window = checkpoint.get("pending") or {
+                "start_time": checkpoint.get("complete_through")
+                or (now - timedelta(hours=2)).isoformat(),
+                "end_time": (now - timedelta(seconds=30)).isoformat(),
+            }
+            if datetime.fromisoformat(window["start_time"]) >= datetime.fromisoformat(
+                window["end_time"]
+            ):
+                return {"status": "COMPLETE", "posts": 0, "scope": "NO_NEW_WINDOW"}
+            self.store.set_state(
+                "social_checkpoint",
+                {**checkpoint, "query": self.settings.x_query, "pending": window},
+            )
+            for _ in range(self.settings.social_max_pages):
+                params = {
                     "query": self.settings.x_query,
                     "max_results": 100,
                     "tweet.fields": "created_at,public_metrics,author_id",
                     "expansions": "author_id",
                     "user.fields": "public_metrics",
-                },
-                headers={
-                    "Authorization": "Bearer " + self.settings.x_bearer_token.get_secret_value()
-                },
-            )
-            if not response.is_success:
-                return {"status": "UNAVAILABLE", "http_status": response.status_code}
-            payload = response.json()
-            now = utc_now()
-            users = {u["id"]: u for u in payload.get("includes", {}).get("users", [])}
-            count = 0
-            for post in payload.get("data", []):
-                metrics = post.get("public_metrics", {})
-                user = users.get(post["author_id"], {})
-                item = ContextInput(
-                    kind="social",
-                    key=post["id"],
-                    source_url="https://x.com/i/status/" + post["id"],
-                    market_time=post["created_at"],
-                    data={
-                        "platform": "X",
-                        "post_id": post["id"],
-                        "author_id": post["author_id"],
-                        "text": post["text"],
-                        "likes": metrics.get("like_count", 0),
-                        "replies": metrics.get("reply_count", 0),
-                        "reposts": metrics.get("retweet_count", 0),
-                        "followers": user.get("public_metrics", {}).get("followers_count"),
+                    **window,
+                }
+                response = await self.providers.client.get(
+                    "https://api.x.com/2/tweets/search/recent",
+                    params=params,
+                    headers={
+                        "Authorization": "Bearer " + self.settings.x_bearer_token.get_secret_value()
                     },
                 )
-                import_context(self.store, item, now)
-                count += 1
-            return {"status": "COMPLETE", "posts": count, "scope": "ONE_RECENT_API_PAGE"}
+                if not response.is_success:
+                    return {
+                        "status": "UNAVAILABLE",
+                        "http_status": response.status_code,
+                        "posts": count,
+                    }
+                payload = response.json()
+                if not isinstance(payload, dict) or "meta" not in payload or payload.get("errors"):
+                    return {
+                        "status": "UNAVAILABLE",
+                        "posts": count,
+                        "reason": "Incomplete X response",
+                    }
+                at = utc_now()
+                raw = self.store.save_raw(
+                    "X", "https://api.x.com/2/tweets/search/recent", payload, at
+                )
+                users = {u["id"]: u for u in payload.get("includes", {}).get("users", [])}
+                for post in payload.get("data", []):
+                    metrics = post.get("public_metrics", {})
+                    user = users.get(post["author_id"], {})
+                    item = ContextInput(
+                        kind="social",
+                        key=post["id"],
+                        source_url="https://x.com/i/status/" + post["id"],
+                        market_time=post["created_at"],
+                        data={
+                            "platform": "X",
+                            "post_id": post["id"],
+                            "author_id": post["author_id"],
+                            "text": post["text"],
+                            "likes": metrics.get("like_count", 0),
+                            "replies": metrics.get("reply_count", 0),
+                            "reposts": metrics.get("retweet_count", 0),
+                            "followers": user.get("public_metrics", {}).get("followers_count"),
+                        },
+                    )
+                    import_context(self.store, item, at)
+                    count += 1
+                next_token = payload.get("meta", {}).get("next_token")
+                if not next_token:
+                    self.store.set_state(
+                        "social_checkpoint",
+                        {
+                            "query": self.settings.x_query,
+                            "complete_through": window["end_time"],
+                            "last_raw_id": raw,
+                            "pending": None,
+                        },
+                    )
+                    return {
+                        "status": "COMPLETE",
+                        "posts": count,
+                        "scope": "COMPLETE_QUERY_WINDOW",
+                        "start_time": window["start_time"],
+                        "end_time": window["end_time"],
+                    }
+                window["next_token"] = next_token
+                self.store.set_state(
+                    "social_checkpoint",
+                    {
+                        **checkpoint,
+                        "query": self.settings.x_query,
+                        "pending": window,
+                        "last_raw_id": raw,
+                    },
+                )
+            return {
+                "status": "DEGRADED",
+                "posts": count,
+                "scope": "PARTIAL_QUERY_WINDOW",
+                "resume_pending": True,
+            }
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
-            return {"status": "UNAVAILABLE", "posts": 0}
+            return {"status": "UNAVAILABLE", "posts": count}
         finally:
             self.archive.release("social", token)
 
@@ -132,6 +198,8 @@ class SocialEngine:
             )
         return {
             "as_of": now.isoformat(),
+            "collection_window": self.store.state("social_checkpoint"),
+            "change_interpretation": "OBSERVED_SAMPLE_ONLY_NOT_MARKET_WIDE",
             "observed_posts_1h": len(recent),
             "unique_authors": len(authors),
             "mention_velocity_per_hour": len(recent),

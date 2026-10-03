@@ -1,3 +1,5 @@
+import base64
+import gzip
 import hashlib
 import json
 import sqlite3
@@ -21,8 +23,11 @@ class Store:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
-            if db.execute("PRAGMA user_version").fetchone()[0] > 3:
+            if db.execute("PRAGMA user_version").fetchone()[0] > 4:
                 raise ValueError("Database schema is newer than this application; upgrade the app")
+            version = db.execute("PRAGMA user_version").fetchone()[0]
+            if version in (1, 2, 3):
+                self.backup(path.with_suffix(path.suffix + ".pre-v4.bak"))
             db.executescript("""
                 PRAGMA journal_mode=WAL;
                 CREATE TABLE IF NOT EXISTS raw_observations (
@@ -91,11 +96,12 @@ class Store:
                 CREATE TABLE IF NOT EXISTS intelligence_records (
                     id TEXT PRIMARY KEY, kind TEXT NOT NULL, key TEXT NOT NULL,
                     market_time TEXT NOT NULL, available_at TEXT NOT NULL,
-                    content_hash TEXT NOT NULL, payload TEXT NOT NULL,
-                    UNIQUE(kind,key,content_hash)
+                    content_hash TEXT NOT NULL, payload TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS intelligence_pit
                     ON intelligence_records(kind,key,available_at);
+                CREATE INDEX IF NOT EXISTS intelligence_market_time
+                    ON intelligence_records(kind,market_time,available_at);
                 CREATE TABLE IF NOT EXISTS research_checks (
                     id TEXT PRIMARY KEY, source TEXT NOT NULL, checked_at TEXT NOT NULL,
                     succeeded INTEGER NOT NULL, message TEXT NOT NULL
@@ -114,8 +120,32 @@ class Store:
                 CREATE TABLE IF NOT EXISTS collection_leases (
                     name TEXT PRIMARY KEY, token TEXT NOT NULL, expires_at TEXT NOT NULL
                 );
-                PRAGMA user_version=3;
+                CREATE TABLE IF NOT EXISTS evidence_checks (
+                    record_id TEXT NOT NULL, checked_at TEXT NOT NULL, raw_ids TEXT NOT NULL,
+                    PRIMARY KEY(record_id,checked_at)
+                );
+                CREATE TABLE IF NOT EXISTS decision_configs (
+                    as_of TEXT PRIMARY KEY, payload TEXT NOT NULL
+                );
             """)
+            if version in (1, 2, 3):
+                # Preserve every evidence ID and all lineage while allowing A -> B -> A.
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE intelligence_v4 (
+                        id TEXT PRIMARY KEY, kind TEXT NOT NULL, key TEXT NOT NULL,
+                        market_time TEXT NOT NULL, available_at TEXT NOT NULL,
+                        content_hash TEXT NOT NULL, payload TEXT NOT NULL
+                    );
+                    INSERT INTO intelligence_v4 SELECT * FROM intelligence_records;
+                    DROP TABLE intelligence_records;
+                    ALTER TABLE intelligence_v4 RENAME TO intelligence_records;
+                    CREATE INDEX intelligence_pit ON intelligence_records(kind,key,available_at);
+                    CREATE INDEX intelligence_market_time
+                        ON intelligence_records(kind,market_time,available_at);
+                    COMMIT;
+                """)
+            db.execute("PRAGMA user_version=4")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -132,6 +162,8 @@ class Store:
         raw_id = new_id()
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, allow_nan=False)
         digest = hashlib.sha256(encoded.encode()).hexdigest()
+        if len(encoded) > 4096:
+            encoded = "gzip:" + base64.b64encode(gzip.compress(encoded.encode(), mtime=0)).decode()
         with self.connect() as db:
             db.execute(
                 "INSERT INTO raw_observations VALUES (?,?,?,?,?,?)",
@@ -145,7 +177,10 @@ class Store:
         if not row:
             return None
         result = dict(row)
-        result["payload"] = json.loads(result["payload"])
+        encoded = result["payload"]
+        if encoded.startswith("gzip:"):
+            encoded = gzip.decompress(base64.b64decode(encoded[5:])).decode()
+        result["payload"] = json.loads(encoded)
         return result
 
     def save_snapshot(self, snapshot: Snapshot) -> None:
@@ -454,3 +489,41 @@ class Store:
         destination.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as source, sqlite3.connect(destination) as target:
             source.backup(target)
+
+    def save_decision_config(self, at, settings):
+        from .decisions import decision_config
+
+        with self.connect() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO decision_configs VALUES (?,?)",
+                (stamp(at), json.dumps(decision_config(settings))),
+            )
+
+    def decision_config(self, at):
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT payload FROM decision_configs WHERE as_of=?", (stamp(at),)
+            ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def diagnostics(self):
+        with self.connect() as db:
+            counts = {
+                name: db.execute("SELECT COUNT(*) FROM " + name).fetchone()[0]
+                for name in (
+                    "snapshots",
+                    "raw_observations",
+                    "ranking_history",
+                    "intelligence_records",
+                    "evidence_checks",
+                )
+            }
+        return {
+            "rows": counts,
+            "database_bytes": self.path.stat().st_size,
+            "wal_bytes": Path(str(self.path) + "-wal").stat().st_size
+            if Path(str(self.path) + "-wal").exists()
+            else 0,
+            "retention": "PRESERVE_LINEAGE",
+            "schema_version": 4,
+        }

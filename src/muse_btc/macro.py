@@ -9,6 +9,7 @@ from .models import ProviderState, utc_now
 from .providers.common import ProviderError, number
 from .providers.public_intelligence import Page
 from .rules import quote_usable
+from .storage import stamp
 
 MACRO_MISSING = ["CME FedWatch", "FOMC expectations", "ISM", "MOVE", "Gold", "release consensus"]
 
@@ -179,9 +180,10 @@ class MacroEngine:
         fresh = {
             r.key: r
             for r in macro
-            if (now - r.available_at).total_seconds()
+            if (now - self.archive.last_checked(r, now)).total_seconds()
             <= self.settings.intelligence_refresh_seconds * 2
-            and (now - r.market_time).days <= self.settings.macro_stale_days
+            and (now - r.market_time).days
+            <= self.settings.macro_series_max_age_days.get(r.key, self.settings.macro_stale_days)
         }
         spreads = None
         if all(k in fresh for k in ("DGS2", "DGS10")):
@@ -198,7 +200,9 @@ class MacroEngine:
                     - fresh["RRPONTSYD"].data["value"] * 1000
                 ) * 1000000
         stables = self.archive.records("stablecoin", now)
-        stable_fresh = [r for r in stables if (now - r.available_at).total_seconds() <= 86400]
+        stable_fresh = [
+            r for r in stables if (now - self.archive.last_checked(r, now)).total_seconds() <= 86400
+        ]
         change = [
             r.data["change_7d_pct"] for r in stable_fresh if r.data["change_7d_pct"] is not None
         ]
@@ -208,7 +212,11 @@ class MacroEngine:
         ]
         return {
             "as_of": now.isoformat(),
-            "series": [r.model_dump(mode="json") for r in macro],
+            "series": [
+                r.model_dump(mode="json")
+                | {"last_checked_at": self.archive.last_checked(r, now).isoformat()}
+                for r in macro
+            ],
             "missing": [s for s in self.settings.macro_series if s not in by_series]
             + MACRO_MISSING,
             "stale": [s for s in by_series if s not in fresh],
@@ -241,8 +249,11 @@ class MacroEngine:
                     observations[str(offset)] = None
                     continue
                 snapshots = self.store.snapshot_range(
-                    target - timedelta(seconds=self.settings.poll_seconds * 2),
-                    min(now, target + timedelta(seconds=self.settings.poll_seconds * 2)),
+                    target - timedelta(seconds=self.settings.event_reaction_tolerance_seconds),
+                    min(
+                        now,
+                        target + timedelta(seconds=self.settings.event_reaction_tolerance_seconds),
+                    ),
                     "binance:BTCUSDT",
                 )
                 matches = [
@@ -250,18 +261,70 @@ class MacroEngine:
                     for s in snapshots
                     if quote_usable(s, s.available_at, self.settings)
                     and abs((s.market_time - target).total_seconds())
-                    <= self.settings.poll_seconds * 2
+                    <= self.settings.event_reaction_tolerance_seconds
                 ]
+                candidates = [
+                    {
+                        "price": s.price,
+                        "snapshot_id": s.id,
+                        "market_time": s.market_time.isoformat(),
+                        "quote_source": "MARKET_SNAPSHOT",
+                    }
+                    for s in matches
+                ]
+                with self.store.connect() as db:
+                    raw_quotes = db.execute(
+                        "SELECT payload FROM intelligence_records WHERE kind='btc_event_quote' "
+                        "AND market_time>=? AND market_time<=? AND available_at<=?",
+                        (
+                            stamp(
+                                target
+                                - timedelta(seconds=self.settings.event_reaction_tolerance_seconds)
+                            ),
+                            stamp(
+                                min(
+                                    now,
+                                    target
+                                    + timedelta(
+                                        seconds=self.settings.event_reaction_tolerance_seconds
+                                    ),
+                                )
+                            ),
+                            stamp(now),
+                        ),
+                    ).fetchall()
+                for raw_quote in raw_quotes:
+                    quote = EvidenceRecord.model_validate_json(raw_quote[0])
+                    if (
+                        0
+                        <= (quote.available_at - quote.market_time).total_seconds()
+                        <= self.settings.event_reaction_tolerance_seconds
+                    ):
+                        candidates.append(
+                            {
+                                "price": quote.data["price"],
+                                "snapshot_id": quote.id,
+                                "market_time": quote.market_time.isoformat(),
+                                "quote_source": "EVENT_QUOTE",
+                            }
+                        )
                 nearest = (
-                    min(matches, key=lambda s: abs((s.market_time - target).total_seconds()))
-                    if matches
+                    min(
+                        candidates,
+                        key=lambda s: abs(
+                            (datetime.fromisoformat(s["market_time"]) - target).total_seconds()
+                        ),
+                    )
+                    if candidates
                     else None
                 )
                 observations[str(offset)] = (
-                    {
-                        "price": nearest.price,
-                        "snapshot_id": nearest.id,
-                        "market_time": nearest.market_time.isoformat(),
+                    nearest
+                    | {
+                        "target_time": target.isoformat(),
+                        "offset_seconds": (
+                            datetime.fromisoformat(nearest["market_time"]) - target
+                        ).total_seconds(),
                     }
                     if nearest
                     else None

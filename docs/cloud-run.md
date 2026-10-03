@@ -1,13 +1,13 @@
 # 云端运行 Phase 2–6 框架
 
-运行 `feat/v4-phase2-6` 分支，审阅 PR 后再决定合并。需要 Python 3.12、uv；开发检查另需 Node.js。不要将密钥、邮箱正文或数据库提交 GitHub。
+Phase 2–6 框架和免费数据已合并到 `main`。本次可靠性升级的 PR 合并后按[升级说明](reliability-upgrade.md)更新；尚未合并时只在隔离测试目录检出相应 PR。需要 Python 3.12、uv；开发检查另需 Node.js。不要将密钥、邮箱正文或数据库提交 GitHub。
 
 ## 拉取和框架检查
 
 新目录：
 
 ```bash
-git clone --branch feat/v4-phase2-6 https://github.com/joeyxuepython/muse-btc.git
+git clone --branch main https://github.com/joeyxuepython/muse-btc.git
 cd muse-btc
 cp .env.example .env
 bash scripts/install.sh
@@ -31,7 +31,7 @@ bash scripts/start.sh --host 127.0.0.1 --port 8000
 ssh -L 8000:127.0.0.1:8000 USER@CLOUD_HOST
 ```
 
-打开本机 `http://127.0.0.1:8000` → “研究与扩展”。默认 Phase 1 行情采集开启；先验收空框架可设置 `MUSE_ENABLE_COLLECTOR=false`。研究检查始终由用户触发。
+打开本机 `http://127.0.0.1:8000` → “研究与扩展”。默认 Phase 1 行情采集开启；先验收空框架可设置 `MUSE_ENABLE_COLLECTOR=false`。默认研究检查为手动；本次保持用户暂停的研究定时监控。
 
 Docker 需先在 `.env` 设置随机 `MUSE_API_TOKEN`（容器对外监听需要访问口令）：
 
@@ -40,7 +40,7 @@ docker compose up --build -d
 docker compose logs --tail 100 muse
 ```
 
-Compose 仅映射回环端口，也通过 SSH 转发访问。数据卷 `muse-data`，升级前备份，保持一个市场采集实例。`/health` 表示进程存活；`/ready` 仅验收 Phase 1 行情，不表示新模块全部验收。
+Compose 仅映射回环端口，也通过 SSH 转发访问。数据卷 `muse-data`，升级前备份，保持一个市场采集实例。`/health` 表示进程存活；`/ready` 验收全部目标行情及细节，内置扩展 worker 启用时也检查心跳，但不表示各扩展来源全部验收。
 
 ## 按需运行
 
@@ -54,7 +54,7 @@ Phase 2：
 .venv/bin/muse review-research DOCUMENT_ID /PATH/chinese-review.json
 ```
 
-首次研究检查安静建基线，新研究需中文审阅才提醒。失败查看检查记录、修正适配 / 网络；不要删除基线制造新研究。没有内置 IMAP 自动登录或 LLM 提取。
+首次研究检查安静建基线，新研究需中文审阅才提醒。失败查看检查记录、修正适配 / 网络；不要删除基线制造新研究。沿用 Muse 的既有邮件连接；通过 EML 导入、研究队列和审阅 API 串接已有分析流程，见[升级说明](reliability-upgrade.md)。
 
 Phase 3：`MUSE_ENABLE_INTELLIGENCE=true` 启用分项排名与融合；设 false 保留 Phase 1 行为。`MUSE_RULE_THRESHOLDS` 支持部分覆盖，例如 `{"rvol":2.0,"oi_build_pct":2.0}`；修改同时更新 `MUSE_THRESHOLD_VERSION`。催化剂 / 解锁 / 基本面通过导入接入，缺失不补值。
 

@@ -3,8 +3,11 @@ import logging
 from datetime import datetime
 
 from .alerts import publish_alert
+from .btc_intelligence import apply_btc_context
 from .config import Settings
-from .fusion import enrich_rankings, pre_pump_signals
+from .decisions import decide
+from .fusion import enrich_rankings
+from .intelligence import IntelligenceStore
 from .microstructure import archive_snapshot_trades
 from .models import (
     Module,
@@ -20,7 +23,7 @@ from .models import (
 )
 from .providers import Providers
 from .ranking import rank_assets
-from .rules import evaluate, market_regime, usable
+from .rules import market_regime, usable
 from .storage import Store
 from .validation import validate_pending
 
@@ -84,13 +87,31 @@ class Collector:
 
     async def _loop(self) -> None:
         while True:
+            started = asyncio.get_running_loop().time()
             await self.collect_once()
-            await asyncio.sleep(self.settings.poll_seconds)
+            elapsed = asyncio.get_running_loop().time() - started
+            await asyncio.sleep(max(1, self.settings.poll_seconds - elapsed))
 
     async def collect_once(self) -> dict:
         if self.lock.locked():
             return {"status": "BUSY", "message": "采集正在进行，请等待本轮结束"}
         async with self.lock:
+            archive = IntelligenceStore(self.store)
+            token = archive.acquire("market-collector", utc_now(), 120)
+            if not token:
+                return {"status": "BUSY", "message": "另一进程正在采集"}
+            owner = asyncio.current_task()
+
+            async def heartbeat():
+                while True:
+                    await asyncio.sleep(30)
+                    if not archive.renew("market-collector", token, utc_now()):
+                        owner.cancel()
+                        return
+                    self.store.set_state("market_heartbeat", utc_now().isoformat())
+
+            pulse = asyncio.create_task(heartbeat())
+            self.store.set_state("market_heartbeat", utc_now().isoformat())
             try:
                 binance = await self.providers.binance()
                 memes = await self.providers.memes() if self.settings.enable_meme_discovery else []
@@ -147,7 +168,12 @@ class Collector:
                         saved.append(snapshot)
                     except ValueError:
                         logger.warning("Rejected snapshot: future timestamp or invalid lineage")
+                self.store.save_decision_config(now, self.settings)
                 regime = market_regime(btc if btc in saved else None, now, self.settings)
+                if self.settings.enable_intelligence:
+                    regime = apply_btc_context(
+                        regime, self.store, self.settings, now, btc if btc in saved else None
+                    )
                 self.store.save_regime(regime)
                 ranking = rank_assets(saved, self.store.rankings(now), now, self.settings)
                 if self.settings.enable_intelligence:
@@ -166,6 +192,14 @@ class Collector:
             except Exception:
                 logger.exception("Collection cycle failed")
                 self.last_result = {"status": "FAILED", "message": "本轮失败，下一轮自动重试"}
+            finally:
+                pulse.cancel()
+                try:
+                    await pulse
+                except asyncio.CancelledError:
+                    pass
+                archive.release("market-collector", token)
+                self.store.set_state("market_last_result", self.last_result)
             return self.last_result
 
     def _process_signals(self, snapshots: list[Snapshot], regime: Regime, now: datetime) -> int:
@@ -228,9 +262,7 @@ class Collector:
                     publish_alert(self.store, invalidated, None, now, self.settings)
                     count += 1
         for snapshot in snapshots:
-            candidates = evaluate(snapshot, regime, now, self.settings)
-            if self.settings.enable_intelligence:
-                candidates += pre_pump_signals(snapshot, regime, now, self.settings, self.store)
+            candidates = decide(snapshot, regime, now, self.settings, self.store)
             for signal in candidates:
                 rank = next(
                     (r for r in self.store.rankings(now) if r["asset_id"] == snapshot.asset_id),
@@ -269,6 +301,7 @@ def signal_view(
     now: datetime,
     settings: Settings,
     current_assets: dict[str, Snapshot] | None = None,
+    current_regime: Regime | None = None,
 ) -> dict:
     result = signal.model_dump(mode="json")
     events = store.signal_events(signal.id)
@@ -281,7 +314,10 @@ def signal_view(
     current = current_assets.get(signal.asset_id)
     data_current = bool(current and usable(current, now, settings))
     if signal.kind == SignalKind.ENTRY_CANDIDATE:
-        regime = market_regime(current_assets.get("binance:BTCUSDT"), now, settings)
+        core = current_assets.get("binance:BTCUSDT")
+        regime = current_regime or market_regime(core, now, settings)
+        if current_regime is None and settings.enable_intelligence:
+            regime = apply_btc_context(regime, store, settings, now, core)
         data_current = data_current and regime.risk_mode == "NORMAL"
     if signal.module == Module.MEME:
         data_current = False

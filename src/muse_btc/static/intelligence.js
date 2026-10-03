@@ -41,10 +41,20 @@ function renderIntelligence() {
     html += intelTable(["序列", "最新值", "观察日 / 获取时间", "来源"], m.series.map(r => [escapeHtml(r.key), format(r.data.value), `${time(r.market_time)} / ${time(r.available_at)}`, sourceLink(r.data.source_url)]));
     html += '<h3>稳定币</h3>' + intelTable(["资产", "供应", "7 日变化", "30 日变化"], m.stablecoins.map(r => [escapeHtml(r.data.symbol), price(r.data.supply_usd), pct(r.data.change_7d_pct), pct(r.data.change_30d_pct)]));
     html += '<h3>ETF</h3>' + intelTable(["日期", "资产", "净流入"], m.etf.map(r => [time(r.market_time), escapeHtml(r.data.asset), price(r.data.net_flow_usd)]));
+    html += '<h3>宏观事件</h3><button class="button secondary" data-intel-action="events">检查官方日历与发布值</button><button class="button secondary" id="macro-event-import">导入事件</button>';
+    html += intelTable(["事件", "发布时间", "状态"], (d.events || []).map(r => [escapeHtml(r.data.name), time(r.data.release_time), escapeHtml(r.data.status)]));
+    html += intelTable(["已发布事件", "实际 / 预期", "+5m", "+15m", "+1h", "+4h", "+24h"], (d.event_reactions || []).map(r => [escapeHtml(r.event.data.name), `${format(r.event.data.actual)} / ${format(r.event.data.consensus)}`, ...[300,900,3600,14400,86400].map(t => r.btc_reactions[t] ? `${pct(r.btc_reactions[t].return_from_release_pct)}<small>偏移 ${r.btc_reactions[t].offset_seconds}s</small>` : "数据缺失或未到期")]));
+    if (d.event_checks) html += intelTable(["来源", "结果", "原因"], d.event_checks.sources.map(r => [escapeHtml(r.source), escapeHtml(r.status), escapeHtml(r.reason || "")]));
     html += `<p>缺失：${escapeHtml(m.missing.join("、"))}</p><p>过期：${escapeHtml(m.stale.join("、"))}</p>`;
   } else if (intelligenceTab === "btc") {
     const b = d.btc;
     html = '<p>手动归档免费来源。持有人成本与 SOPR 延迟七天；期权仅覆盖 Deribit，清算为监听期间的采样。</p><div class="actions"><button class="button primary" data-btc-scope="all">采集免费数据</button><button class="button secondary" data-btc-scope="onchain">仅采集链上</button><button class="button secondary" data-btc-scope="options">仅采集期权</button><button class="button secondary" data-btc-scope="liquidations">监听清算 30 秒</button></div>';
+    const assessment = d.btc_assessment;
+    if (assessment) {
+      const labels = {spot_demand:"现货需求",leverage_risk:"杠杆风险",macro_liquidity:"宏观流动性",etf_flow:"ETF 资金流",stablecoin_supply:"稳定币供应",onchain_valuation_percentile:"链上估值分位数",options_iv:"期权波动率",research_bias:"研究观点"};
+      html += `<h3>BTC 综合研判</h3><p>证据覆盖 ${format(assessment.coverage_pct)}% · 宏观背景 ${escapeHtml(assessment.macro_risk)} · 分数为规则描述，置信度尚未校准。</p>`;
+      html += intelTable(["维度", "分值 / 状态", "依据"], Object.entries(assessment.dimensions).map(([k,v]) => [escapeHtml(labels[k] || k), `${format(v.score)} / ${escapeHtml(v.status)}`, escapeHtml(v.evidence.join("；"))]));
+    }
     html += '<h3>BTC 链上</h3>' + intelTable(["指标 / 来源", "最新值 / 单位", "观察日期", "状态 / 历史点数"], b.onchain.map(r => [
       `${escapeHtml(r.metric)}<small>${escapeHtml(r.source)}</small>${sourceLink(r.source_url)}`,
       `${format(r.value,4)} ${escapeHtml(r.unit)}`, time(r.observation_date), `${escapeHtml(r.status)} / ${r.observations}`]));
@@ -81,6 +91,10 @@ function renderIntelligence() {
     html += intelTable(["模型", "状态", "样本", "测试 Brier"], d.models.map(r => [escapeHtml(r.id), escapeHtml(r.data.status), escapeHtml(JSON.stringify(r.data.samples)), format(r.data.test_brier_score,4)]));
     html += '<pre id="experiment-output" class="intelligence-json"></pre>';
   }
+  if (d.runtime) {
+    html += `<h3>采集运行状态</h3><p>扩展采集：${escapeHtml(d.runtime.worker.status)} · 最近心跳 ${time(d.runtime.worker.heartbeat_at)}</p>`;
+    html += intelTable(["任务", "状态", "最近成功", "完成时间"], d.runtime.jobs.map(r => [escapeHtml(r.name), escapeHtml(r.status), time(r.last_success_at), time(r.finished_at)]));
+  }
   $("#intelligence-content").innerHTML = html;
   $$("[data-intel-tab]").forEach(b => b.classList.toggle("selected", b.dataset.intelTab === intelligenceTab));
 }
@@ -100,6 +114,21 @@ document.addEventListener("click", async event => {
   const button = event.target.closest("button");
   if (!button) return;
   try {
+    if (button.id === "macro-event-import") {
+      $("#detail-title").textContent = "导入已发布宏观事件";
+      $("#detail-body").innerHTML = '<form id="macro-form"><label>事件名称<input name="name" required></label><label>发布时间（本地时区）<input name="release" type="datetime-local" required></label><label>实际值<input name="actual" type="number" step="any" required></label><label>市场预期（可空）<input name="consensus" type="number" step="any"></label><label>单位<input name="units" required></label><label>原始 HTTPS 来源<input name="source" type="url" required></label><button class="button primary" type="submit">保存事件</button></form>';
+      $("#detail").showModal();
+      $("#macro-form").addEventListener("submit", async event => {
+        event.preventDefault();
+        try {
+          const f = new FormData(event.target);
+          const release = new Date(f.get("release")).toISOString();
+          const data = {name:f.get("name"),release_time:release,actual:Number(f.get("actual")),consensus:f.get("consensus") === "" ? null : Number(f.get("consensus")),units:f.get("units"),vintage:"MANUAL_IMPORT"};
+          await api("/api/context/import", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({kind:"macro_event",key:`${data.name}:${release}`,source_url:f.get("source"),market_time:release,data})});
+          $("#detail").close(); await loadIntelligence();
+        } catch (error) { notice(error.message); }
+      });
+    }
     if (button.dataset.intelTab) { intelligenceTab = button.dataset.intelTab; renderIntelligence(); }
     if (button.dataset.btcScope) {
       button.disabled = true;

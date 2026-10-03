@@ -20,6 +20,7 @@ class OKXDerivativesProvider:
         self.bulk_raw_ids = []
         self.bulk_received_at = None
         self.bulk_received_times = {}
+        self.detail_cache = {}
 
     async def get(self, path, params):
         payload, raw_id, at = await self.request("OKX Futures", self.settings.okx_url, path, params)
@@ -124,8 +125,30 @@ class OKXDerivativesProvider:
             "perp_trades": ("/api/v5/market/trades", {"instId": inst, "limit": 100}),
             "perp_candles": ("/api/v5/market/candles", {"instId": inst, "bar": "1m", "limit": 100}),
         }
+
+        async def query(name, path, params):
+            ttl = (
+                240
+                if name
+                in {
+                    "funding_history",
+                    "oi_history",
+                    "taker",
+                    "long_short",
+                    "elite_accounts",
+                    "elite_positions",
+                }
+                else 0
+            )
+            cached = self.detail_cache.get((inst, name))
+            if cached and 0 <= (at - cached[2]).total_seconds() < ttl:
+                return cached
+            result = await self.get(path, params)
+            self.detail_cache[(inst, name)] = result
+            return result
+
         results = await asyncio.gather(
-            *(self.get(p, q) for p, q in queries.values()), return_exceptions=True
+            *(query(name, p, q) for name, (p, q) in queries.items()), return_exceptions=True
         )
         for name, result in zip(queries, results, strict=True):
             if not isinstance(result, tuple):

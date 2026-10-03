@@ -69,17 +69,22 @@ class BinanceSpotProvider:
         details = set(CORE)
         # Allocate slots by tier without starving lower tiers; checkpoints survive restart.
         remaining = self.settings.detail_batch_size
-        active_tiers = [
-            t for t in ("TIER1", "TIER2", "TIER3") if any(r["tier"] == t for r in selected)
-        ]
-        for index, tier in enumerate(active_tiers):
-            entries = [r["binance_symbol"] for r in selected if r["tier"] == tier]
-            slots = remaining if index == len(active_tiers) - 1 else max(1, remaining // 2)
-            slots = min(len(entries), slots, remaining)
-            cursor = self.store.state("cursor_" + tier) or 0
-            details.update(entries[(cursor + i) % len(entries)] for i in range(slots))
-            self.store.set_state("cursor_" + tier, (cursor + slots) % len(entries))
-            remaining -= slots
+        if remaining >= len(selected) - len(CORE):
+            details.update(r["binance_symbol"] for r in selected)
+        else:
+            # Optional reduced budget: oldest evidence first; tier only breaks ties.
+            previous_by_symbol = {s.symbol: s for s in self.store.latest_snapshots(now)}
+
+            def age_key(entry):
+                old = previous_by_symbol.get(entry["binance_symbol"])
+                return (
+                    old.detail_updated_at.timestamp() if old and old.detail_updated_at else 0,
+                    entry["tier"],
+                    entry["binance_symbol"],
+                )
+
+            candidates = [r for r in selected if r["binance_symbol"] not in CORE]
+            details.update(r["binance_symbol"] for r in sorted(candidates, key=age_key)[:remaining])
         self.round += 1
         self.store.set_state("detail_round", self.round)
         previous = {s.symbol: s for s in self.store.latest_snapshots(now)}

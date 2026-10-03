@@ -16,6 +16,8 @@ KINDS = {
     "research_review",
     "macro",
     "macro_event",
+    "macro_calendar",
+    "btc_event_quote",
     "stablecoin",
     "etf",
     "catalyst",
@@ -71,6 +73,7 @@ class IntelligenceStore:
             raise ValueError("Unknown evidence type or future source time")
         content_hash = digest(record.data)
         with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             for raw_id in record.raw_ids:
                 raw = db.execute(
                     "SELECT received_at FROM raw_observations WHERE id=?", (raw_id,)
@@ -78,12 +81,17 @@ class IntelligenceStore:
                 if not raw or datetime.fromisoformat(raw[0]) > record.available_at:
                     raise ValueError("Evidence refers to missing or future raw data")
             old = db.execute(
-                "SELECT payload FROM intelligence_records WHERE kind=? AND key=? "
-                "AND content_hash=?",
-                (record.kind, record.key, content_hash),
+                "SELECT payload,content_hash FROM intelligence_records WHERE kind=? AND key=? "
+                "ORDER BY available_at DESC,rowid DESC LIMIT 1",
+                (record.kind, record.key),
             ).fetchone()
-            if old:
-                return EvidenceRecord.model_validate_json(old[0])
+            if old and old[1] == content_hash:
+                saved = EvidenceRecord.model_validate_json(old[0])
+                db.execute(
+                    "INSERT OR IGNORE INTO evidence_checks VALUES (?,?,?)",
+                    (saved.id, stamp(record.available_at), json.dumps(record.raw_ids)),
+                )
+                return saved
             db.execute(
                 "INSERT INTO intelligence_records VALUES (?,?,?,?,?,?,?)",
                 (
@@ -96,7 +104,28 @@ class IntelligenceStore:
                     record.model_dump_json(),
                 ),
             )
+            db.execute(
+                "INSERT OR IGNORE INTO evidence_checks VALUES (?,?,?)",
+                (record.id, stamp(record.available_at), json.dumps(record.raw_ids)),
+            )
         return record
+
+    def last_checked(self, record, as_of):
+        with self.store.connect() as db:
+            row = db.execute(
+                "SELECT MAX(checked_at) FROM evidence_checks WHERE record_id=? AND checked_at<=?",
+                (record.id, stamp(as_of)),
+            ).fetchone()
+        return datetime.fromisoformat(row[0]) if row and row[0] else record.available_at
+
+    def renew(self, name, token, now, seconds=120):
+        with self.store.connect() as db:
+            changed = db.execute(
+                "UPDATE collection_leases SET expires_at=? "
+                "WHERE name=? AND token=? AND expires_at>?",
+                (stamp(now + timedelta(seconds=seconds)), name, token, stamp(now)),
+            )
+        return bool(changed.rowcount)
 
     def records(
         self,
@@ -106,24 +135,28 @@ class IntelligenceStore:
         limit: int = 1000,
         latest: bool = True,
     ) -> list[EvidenceRecord]:
-        query = "SELECT payload FROM intelligence_records WHERE kind=? AND available_at<=?"
+        where = "kind=? AND available_at<=?"
         args: list = [kind, stamp(as_of)]
         if key:
-            query += " AND key=?"
+            where += " AND key=?"
             args.append(key)
-        query += " ORDER BY available_at DESC,rowid DESC"
+        limit = max(1, min(limit, 100000))
+        if latest:
+            query = (
+                "SELECT payload FROM (SELECT payload,available_at,rowid AS sequence, "
+                "ROW_NUMBER() OVER (PARTITION BY key ORDER BY available_at DESC,rowid DESC) AS n "
+                "FROM intelligence_records WHERE " + where + ") WHERE n=1 "
+                "ORDER BY available_at DESC,sequence DESC LIMIT ?"
+            )
+        else:
+            query = (
+                "SELECT payload FROM intelligence_records WHERE "
+                + where
+                + " ORDER BY available_at DESC,rowid DESC LIMIT ?"
+            )
         with self.store.connect() as db:
-            rows = db.execute(query, args).fetchall()
-        result, seen = [], set()
-        for row in rows:
-            record = EvidenceRecord.model_validate_json(row[0])
-            if latest and record.key in seen:
-                continue
-            seen.add(record.key)
-            result.append(record)
-            if len(result) >= max(1, min(limit, 100000)):
-                break
-        return result
+            rows = db.execute(query, [*args, limit]).fetchall()
+        return [EvidenceRecord.model_validate_json(row[0]) for row in rows]
 
     def by_id(self, record_id: str, as_of: datetime) -> EvidenceRecord | None:
         with self.store.connect() as db:

@@ -153,6 +153,11 @@ class Regime(Record):
     rotation: str = "UNKNOWN"
     macro: str = "UNAVAILABLE"
     scope: str = "BINANCE_BTC"
+    confidence: str = "UNCALIBRATED"
+    evidence_coverage_pct: float = 0
+    previous_risk_mode: str | None = None
+    regime_start_time: AwareDatetime | None = None
+    regime_duration_seconds: float = 0
     evidence: list[str] = []
     contradictions: list[str] = []
     btc_snapshot_id: str | None = None

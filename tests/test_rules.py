@@ -100,11 +100,11 @@ def test_goplus_missing_flags_not_treated_as_safe():
     assert blocked.status == "BLOCKED"
 
 
-def test_incomplete_detail_risk_is_observation_only(now, settings):
+def test_spot_risk_survives_missing_unrelated_derivatives(now, settings):
     btc = snapshot(now)
     btc.features.funding_rate_pct = None
     btc.features.return_15m_pct = -2
     btc.features.spot_taker_buy_ratio = 0.3
     signals = evaluate(btc, market_regime(btc, now, settings), now, settings)
-    assert signals and all(s.kind == SignalKind.WATCH for s in signals)
+    assert signals and all(s.kind == SignalKind.RISK for s in signals)
     assert all(s.entry_zone is None for s in signals)

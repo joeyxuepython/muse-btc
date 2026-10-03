@@ -12,8 +12,10 @@ from pydantic import BaseModel, Field
 
 from .alerts import alert_view, change_alert
 from .btc_data import BTCDataEngine
+from .btc_intelligence import apply_btc_context, btc_assessment
 from .config import Settings
 from .context import import_context
+from .events import EventEngine
 from .experiments import paid_evaluation, ranking_report, train_model
 from .intelligence import ContextInput, IntelligenceStore
 from .macro import MacroEngine
@@ -26,6 +28,7 @@ from .service import Collector, signal_view
 from .social import SocialEngine
 from .storage import Store
 from .validation import validation_report
+from .worker import IntelligenceWorker, runtime_health
 
 STATIC = Path(__file__).parent / "static"
 
@@ -71,10 +74,26 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             row["quote_fresh"] = bool(snapshot and quote_usable(snapshot, now, config))
         return rows
 
-    def alert_response(alert, now):
+    def current_regime(btc, now):
+        regime = market_regime(btc, now, config)
+        return (
+            apply_btc_context(regime, store, config, now, btc)
+            if config.enable_intelligence
+            else regime
+        )
+
+    def alert_response(alert, now, regime=None):
         result = alert_view(alert, now)
         snapshot = store.snapshot(alert["snapshot_id"])
         result["data_current"] = bool(snapshot and usable(snapshot, now, config))
+        if alert["level"] == "STRONG":
+            if regime is None:
+                btc = next(
+                    (s for s in store.latest_snapshots(now) if s.asset_id == "binance:BTCUSDT"),
+                    None,
+                )
+                regime = current_regime(btc, now)
+            result["data_current"] = result["data_current"] and regime.risk_mode == "NORMAL"
         result["lifecycle_state"] = result["state"]
         if result["state"] == "ACTIVE" and not result["data_current"]:
             result["state"] = "PAUSED"
@@ -84,8 +103,23 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await collector.start()
-        yield
-        await collector.stop()
+        worker_providers = (
+            providers_factory(config, store) if config.enable_background_intelligence else None
+        )
+        task = (
+            asyncio.create_task(IntelligenceWorker(store, config, worker_providers).run())
+            if worker_providers
+            else None
+        )
+        try:
+            yield
+        finally:
+            if task:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            if worker_providers:
+                await worker_providers.close()
+            await collector.stop()
 
     app = FastAPI(title="Muse Crypto Intelligence", version="0.2.0", lifespan=lifespan)
     app.state.store, app.state.collector, app.state.settings = store, collector, config
@@ -155,6 +189,11 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             or not eth
             or not usable(eth, now, config)
             or len(fresh_quotes) < config.max_altcoins + 2
+            or sum(usable(s, now, config) for s in fresh_quotes) < config.max_altcoins + 2
+            or (
+                config.enable_background_intelligence
+                and runtime_health(store, now)["worker"]["status"] != "RUNNING"
+            )
         ):
             return JSONResponse(
                 {
@@ -183,6 +222,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
         now = utc_now()
         snapshots = store.latest_snapshots(now)
         btc = next((s for s in snapshots if s.asset_id == "binance:BTCUSDT"), None)
+        regime = current_regime(btc, now)
         assets = []
         active_symbols = set(providers.universe_symbols)
         for snapshot in snapshots:
@@ -214,13 +254,15 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             "coverage": providers.coverage,
             "universe": store.universe(now),
             "rankings": ranking_views(now),
-            "alerts": [alert_response(a, now) for a in store.alerts()],
+            "alerts": [alert_response(a, now, regime) for a in store.alerts()],
             "request_metrics": providers.metrics,
             "as_of": now.isoformat(),
-            "regime": market_regime(btc, now, config),
+            "regime": regime,
             "assets": assets,
             "signals": [
-                signal_view(store, s, now, config, {item.asset_id: item for item in snapshots})
+                signal_view(
+                    store, s, now, config, {item.asset_id: item for item in snapshots}, regime
+                )
                 for s in store.signals()
             ],
             "providers": statuses,
@@ -352,7 +394,13 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
                 "5": "REQUIRES_CREDENTIALS_OR_IMPORT",
                 "6": "REQUIRES_MATURE_HISTORY",
             },
-            "scheduled_research": False,
+            "scheduled_research": config.enable_background_intelligence
+            and "research" in config.background_scopes,
+            "btc_assessment": btc_assessment(store, config, now),
+            "events": EventEngine(store, config, public).calendar(now),
+            "event_reactions": macro.event_reactions(now),
+            "event_checks": store.state("event_checks"),
+            "runtime": runtime_health(store, now),
             "meme_collection_enabled": config.enable_meme_discovery,
             "social_collection_enabled": config.enable_social,
         }
@@ -371,11 +419,13 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             raise HTTPException(422, str(exc)) from exc
 
     @app.post("/api/intelligence/collect/{scope}")
-    async def collect_intelligence(scope: Literal["macro", "social", "meme", "btc"]):
+    async def collect_intelligence(scope: Literal["macro", "events", "social", "meme", "btc"]):
         if not public:
             raise HTTPException(503, "当前 provider 未提供公开研究接口")
         if scope == "macro":
             return await macro.collect()
+        if scope == "events":
+            return await EventEngine(store, config, public).collect()
         if scope == "btc":
             return await btc_data.collect()
         if scope == "social":
@@ -425,6 +475,22 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             return research.import_email(item.content.encode(), utc_now())
         except (ValueError, TypeError) as exc:
             raise HTTPException(422, "邮件格式、来源或原始链接无法验证") from exc
+
+    @app.get("/api/research/queue")
+    def research_queue():
+        return research.queue(utc_now())
+
+    @app.get("/api/runtime")
+    def runtime_status():
+        return runtime_health(store, utc_now())
+
+    @app.get("/api/btc/assessment")
+    def assessment():
+        return btc_assessment(store, config, utc_now())
+
+    @app.get("/api/macro/calendar")
+    def calendar():
+        return EventEngine(store, config, public).calendar(utc_now())
 
     @app.get("/api/macro/reactions")
     def macro_reactions():
