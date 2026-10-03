@@ -105,6 +105,7 @@ class Features(Record):
     perp_ask_depth_1pct_usdt: float | None = None
     spot_perp_structure: str | None = None
     deleveraging_signal: bool | None = None
+    spot_depth_bands: dict[str, dict[str, float | bool]] = {}
 
 
 class TokenRisk(Record):

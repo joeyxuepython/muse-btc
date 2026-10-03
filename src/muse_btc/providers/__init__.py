@@ -164,6 +164,11 @@ class Providers:
         self.futures_source_used: set[str] = set()
         self.derivatives = OKXDerivativesProvider(settings, store, self.get)
         self.spot = BinanceSpotProvider(settings, store, self.get, self.derivatives)
+        from ..meme import MemeEngine
+        from .public_intelligence import PublicIntelligence
+
+        self.public = PublicIntelligence(self)
+        self.meme_engine = MemeEngine(self)
         if self.spot.selection:
             self.universe_symbols = [r["binance_symbol"] for r in self.spot.selection["entries"]]
 
@@ -306,8 +311,7 @@ class Providers:
             return []
 
     async def memes(self) -> list[Snapshot]:
-        """DEX discovery is Phase 4. Historical data stays available."""
-        return []
+        return await self.meme_engine.collect()
 
     async def _meme_asset(self, chain: str, address: str, profile_raw: str) -> Snapshot | None:
         return None

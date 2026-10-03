@@ -1,6 +1,10 @@
 # MUSE · 加密市场研判与 Web 预警
 
-按[最新 V4 计划](docs/requirements/v4-latest-plan.md)开发：**BTC、ETH 独立监控，加 100 个动态 USDT 山寨币，共 102 个现货标的**。币安提供现货，OKX 提供合约。此分支实现 Phase 1；后续宏观、研究、邮箱、链上 Meme、社交与 ML 分阶段推进。Telegram 已取消。
+按[最新 V4 计划](docs/requirements/v4-latest-plan.md)开发：**BTC、ETH 独立监控，加 100 个动态 USDT 山寨币，共 102 个现货标的**。币安提供现货，OKX 提供合约。Phase 1 已实现，V0.2 增加 Phase 2–6 可运行框架；真实来源、凭据、历史样本和后续适配需云端验收。Telegram 已取消。
+
+新入口：网页“研究与扩展”。[云端运行步骤](docs/cloud-run.md) · [框架和未验收能力](docs/phase2-6-framework.md)。研究检查手动触发、首次只建基线，无新增定时任务。Meme / X 默认关闭，模型不自动晋级。
+
+[免费 BTC 数据](docs/free-btc-data.md)已提供日线 MVRV、延迟 SOPR / 持有人成本、Deribit 期权和采样清算的手动采集、归档与网页入口。云端可执行 `.venv/bin/muse free-data --scope all`；宏观、稳定币和 ETF 同时复用现有免费适配器。
 
 ## 已实现的第一阶段
 
@@ -52,7 +56,7 @@ docker compose -f docker-compose.yml -f docker-compose.cloud.yml up --build -d
 
 ## 数据与就绪状态
 
-公开核心采集无需交易所账户凭据。默认币安现货源为官方只读 `data-api.binance.vision`；合约只请求 `www.okx.com`。旧 `MUSE_FUTURES_SOURCE=binance/auto` 可继续读取，但 V4 合约实际统一使用 OKX，不再请求 Binance Futures。
+公开核心采集无需交易所账户凭据。默认币安现货源为官方只读 `data-api.binance.vision`；核心合约指标只请求 `www.okx.com`。旧 `MUSE_FUTURES_SOURCE=binance/auto` 可继续读取，但 V4 核心合约指标实际统一使用 OKX。免费清算模块仅在显式命令中连接 Binance 公共 WebSocket，不进入自动行情采集。
 
 OKX 已按[官方能力矩阵](OKX_CAPABILITY_MATRIX.md)核验公共接口。各币的 API 支持和网络状态不同，缺失数据会显式显示。币安出口/IP 问题仍由用户处理，程序不会以测试样本替代失败采集。
 

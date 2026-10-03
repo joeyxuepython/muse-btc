@@ -91,7 +91,7 @@ def market_regime(btc: Snapshot | None, now: datetime, settings: Settings) -> Re
     else:
         result.risk_mode = "NORMAL"
         result.evidence = ["当前规则未触发 BTC 急跌或杠杆过热条件"]
-    result.contradictions = ["尚未接入宏观、稳定币资金流和全市场市值数据"]
+    result.contradictions = ["宏观、稳定币资金流和全市场市值尚未融合到当前风险规则"]
     return result
 
 

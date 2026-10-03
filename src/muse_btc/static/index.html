@@ -7,6 +7,7 @@
     <title>MUSE · 加密市场研判</title>
     <link rel="stylesheet" href="/static/style.css" />
     <script defer src="/static/app.js"></script>
+    <script defer src="/static/intelligence.js"></script>
   </head>
   <body>
     <aside class="sidebar">
@@ -26,11 +27,12 @@
         <button class="nav-item" data-view="RANKING"><span>▦</span>100 币雷达</button>
         <button class="nav-item" data-view="HEATMAP"><span>◫</span>机会热图</button>
         <button class="nav-item" data-view="ALERTS"><span>!</span>Web 预警 <span id="alert-badge">0</span></button>
+        <button class="nav-item" data-view="INTELLIGENCE"><span>⌘</span>研究与扩展</button>
         <button class="nav-item" data-view="ALT">
           <span>↗</span>山寨币雷达
         </button>
         <button class="nav-item" data-view="MEME">
-          <span>◎</span>DEX 历史归档
+          <span>◎</span>Meme 发现池
         </button>
         <button class="nav-item" data-view="SIGNALS">
           <span>⌁</span>提醒记录
@@ -45,7 +47,7 @@
       </div>
       <div class="sidebar-bottom">
         <span class="avatar">M</span>
-        <div>研究工作台<small>V0.1 · 规则观察期</small></div>
+        <div>研究工作台<small>V0.2 · 规则观察期</small></div>
       </div>
     </aside>
     <main>
@@ -60,8 +62,9 @@
           <option value="RANKING">100 币雷达</option>
           <option value="HEATMAP">机会热图</option>
           <option value="ALERTS">Web 预警</option>
+          <option value="INTELLIGENCE">研究与扩展</option>
           <option value="ALT">山寨币雷达</option>
-          <option value="MEME">DEX 历史归档</option>
+          <option value="MEME">Meme 发现池</option>
           <option value="SIGNALS">提醒记录</option>
           <option value="VALIDATION">历史验证</option>
         </select>
@@ -119,6 +122,19 @@
             >当前提醒用于前瞻验证；证据评分表示规则满足程度，尚未校准为成功概率。</span
           >
         </div>
+        <section id="intelligence-view" class="panel" hidden>
+          <div class="panel-heading"><div><h2>Phase 2–6 工作台</h2><span>模块框架已接入；真实来源与历史样本在云端验收</span></div></div>
+          <div class="table-controls intelligence-tabs" role="group" aria-label="扩展模块">
+            <button class="button secondary" data-intel-tab="research">研究库</button>
+            <button class="button secondary" data-intel-tab="macro">宏观与资金流</button>
+            <button class="button secondary" data-intel-tab="btc">BTC 免费数据</button>
+            <button class="button secondary" data-intel-tab="meme">Meme 与钱包</button>
+            <button class="button secondary" data-intel-tab="social">社交与叙事</button>
+            <button class="button secondary" data-intel-tab="models">模型与验证</button>
+          </div>
+          <div id="intelligence-content" class="intelligence-content"></div>
+          <div class="panel-footer"><span>研究检查手动触发 · 新数据保留获取时间和原始来源</span><button class="button secondary" id="context-import">导入证据 JSON</button></div>
+        </section>
         <section id="monitor-view" class="panel market-panel">
           <div class="panel-heading">
             <div>
@@ -130,7 +146,7 @@
                 <button class="selected" data-filter="ALL">全部</button
                 ><button data-filter="BTC">BTC</button
                 ><button data-filter="ETH">ETH</button><button data-filter="ALT">山寨币</button
-                ><button data-filter="MEME">DEX 历史</button>
+                ><button data-filter="MEME">Meme</button>
               </div>
               <label class="search"
                 ><span>⌕</span

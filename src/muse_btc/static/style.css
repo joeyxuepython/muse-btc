@@ -1004,3 +1004,12 @@ dialog::backdrop {
 .alert-filters {display:flex;gap:12px;flex-wrap:wrap;padding:16px;}
 .alert-filters select,.alert-filters input,#rank-sort {background:#171c20;color:#d4e4de;border:1px solid #39413d;border-radius:6px;padding:8px;}
 #alert-badge {font-size:11px;background:#285248;border-radius:10px;padding:2px 6px;}
+/* Phase 2–6 modules share the existing workbench typography and panels. */
+.intelligence-tabs { padding: 16px 24px; flex-wrap: wrap; }
+.intelligence-tabs .selected { border-color: var(--accent, #9af0cd); }
+.intelligence-content { padding: 0 24px 24px; overflow-wrap: anywhere; }
+.intelligence-content h3 { margin-top: 28px; }
+.intelligence-content small { display: block; }
+.intelligence-content .actions { margin-bottom: 18px; }
+.intelligence-source, .intelligence-json { white-space: pre-wrap; max-height: 420px; overflow: auto; }
+#intelligence-editor { display: block; width: 100%; box-sizing: border-box; margin: 12px 0; background: #10171c; color: #d8e5de; padding: 12px; border: 1px solid #38453f; border-radius: 8px; font-family: monospace; }

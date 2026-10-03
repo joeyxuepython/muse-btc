@@ -4,6 +4,18 @@ from pathlib import Path
 from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEFAULT_THRESHOLDS = {
+    "flat_price_pct": 0.5,
+    "rvol": 1.8,
+    "oi_build_pct": 1.5,
+    "funding_hot_pct": 0.05,
+    "spot_buy_ratio": 0.58,
+    "relative_strength_pct": 0.3,
+    "max_spread_bps": 15,
+    "setup_groups": 3,
+    "strong_groups": 4,
+}
+
 
 class WatchedToken(BaseModel):
     chain: str
@@ -44,7 +56,7 @@ class Settings(BaseSettings):
     statistics_stale_seconds: int = Field(default=600, ge=300, le=1800)
     alert_score_delta: float = Field(default=10, ge=1, le=100)
     max_memes: int = Field(default=8, ge=1, le=30)
-    meme_chains: list[str] = ["ethereum", "base", "solana"]
+    meme_chains: list[str] = ["ethereum", "base", "bsc", "solana"]
     meme_watchlist: list[WatchedToken] = []
     enable_collector: bool = True
     enable_goplus: bool = False
@@ -64,6 +76,82 @@ class Settings(BaseSettings):
     goplus_url: str = "https://api.gopluslabs.io"
     fee_bps_each_way: float = Field(default=10, ge=0)
     slippage_bps_each_way: float = Field(default=5, ge=0)
+    # Research is checked on demand; these switches never create a scheduled task.
+    enable_intelligence: bool = True
+    enable_meme_discovery: bool = False
+    enable_social: bool = False
+    macro_series: list[str] = [
+        "DFF",
+        "CPIAUCSL",
+        "CPILFESL",
+        "PCEPI",
+        "PCEPILFE",
+        "PAYEMS",
+        "UNRATE",
+        "ICSA",
+        "GDPC1",
+        "DTWEXBGS",
+        "DGS2",
+        "DGS10",
+        "VIXCLS",
+        "NASDAQCOM",
+        "SP500",
+        "WALCL",
+        "WTREGEN",
+        "RRPONTSYD",
+        "WRESBAL",
+    ]
+    macro_stale_days: int = Field(default=45, ge=1, le=180)
+    intelligence_refresh_seconds: int = Field(default=3600, ge=300)
+    research_max_documents: int = Field(default=100, ge=1, le=300)
+    research_max_bytes: int = Field(default=2000000, ge=10000, le=5000000)
+    research_feeds: dict[str, str] = {
+        "Glassnode": "https://research.glassnode.com/rss/",
+        "Coinbase": "https://www.coinbase.com/institutional/research-insights",
+        "CoinShares": "https://coinshares.com/insights/research-data/",
+        "Santiment": "https://insights.santiment.net/feed",
+        "arXiv": "https://export.arxiv.org/api/query",
+    }
+    stablecoins_url: str = "https://stablecoins.llama.fi"
+    fred_url: str = "https://fred.stlouisfed.org"
+    etf_url: str = "https://farside.co.uk/btc/"
+    # Free BTC data are collected only by an explicit CLI/API request.
+    coinmetrics_url: str = "https://community-api.coinmetrics.io/v4"
+    bgeometrics_url: str = "https://bitcoin-data.com/v1"
+    deribit_url: str = "https://www.deribit.com/api/v2"
+    btc_history_days: int = Field(default=365, ge=8, le=1460)
+    btc_onchain_refresh_seconds: int = Field(default=86400, ge=86400)
+    btc_options_refresh_seconds: int = Field(default=300, ge=60)
+    deribit_greeks_limit: int = Field(default=12, ge=0, le=40)
+    x_bearer_token: SecretStr | None = None
+    x_query: str = "(BTC OR ETH OR crypto) -is:retweet lang:en"
+    meme_discovery_batch_size: int = Field(default=20, ge=1, le=100)
+    breakout_threshold_pct: float = Field(default=3, gt=0)
+    ranking_hit_threshold_pct: float = Field(default=2, gt=0)
+    ml_min_samples: int = Field(default=200, ge=40)
+    rule_thresholds: dict[str, float] = DEFAULT_THRESHOLDS
+    threshold_version: str = "thresholds-v4-2"
+
+    @field_validator("macro_series")
+    @classmethod
+    def valid_series(cls, values):
+        if any(not v.isalnum() or len(v) > 32 for v in values):
+            raise ValueError("FRED series identifiers must be alphanumeric")
+        return list(dict.fromkeys(values))
+
+    @field_validator("rule_thresholds")
+    @classmethod
+    def valid_thresholds(cls, values):
+        if set(values) - set(DEFAULT_THRESHOLDS):
+            raise ValueError("Unknown rule threshold")
+        values = DEFAULT_THRESHOLDS | values
+        if any(not math.isfinite(v) or v < 0 for v in values.values()):
+            raise ValueError("Thresholds must be finite and nonnegative")
+        if values["strong_groups"] < max(3, values["setup_groups"]):
+            raise ValueError("STRONG cannot require fewer groups than SETUP")
+        if values["spot_buy_ratio"] > 1 or values["setup_groups"] < 2:
+            raise ValueError("Invalid flow ratio or confirmation count")
+        return values
 
     @field_validator("universe_weights", "ranking_weights")
     @classmethod

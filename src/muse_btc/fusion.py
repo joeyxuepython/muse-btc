@@ -1,0 +1,178 @@
+"""Phase 3 cross-sectional dynamics and configurable pre-pump hypotheses."""
+
+from datetime import datetime, timedelta
+
+from .context import asset_context
+from .intelligence import IntelligenceStore
+from .models import Module, SignalKind
+from .rules import _signal, component_usable, usable
+
+
+def enrich_rankings(rows, snapshots, store, now, settings):
+    by_id = {s.asset_id: s for s in snapshots}
+    archive = IntelligenceStore(store)
+    factors = {
+        "relative_volume": "relative_volume",
+        "oi_acceleration": "oi_acceleration_pct",
+        "funding": "funding_rate_pct",
+        "relative_strength": "relative_strength_15m_pct",
+        "spot_flow": "spot_taker_buy_ratio",
+        "taker_flow": "perp_taker_buy_ratio",
+        "liquidity": "bid_depth_1pct_usd",
+        "order_book": "depth_imbalance",
+        "volatility": "realized_volatility_pct",
+    }
+    for row in rows:
+        context = asset_context(archive, row["asset_id"], now)
+        row["context"] = context
+        row["component_ranks"] = {}
+        row["component_percentiles"] = {}
+        row["rank_velocity_per_hour"] = None
+        with store.connect() as db:
+            old = db.execute(
+                "SELECT payload,as_of FROM ranking_history WHERE asset_id=? "
+                "AND as_of<? ORDER BY as_of DESC LIMIT 1",
+                (row["canonical_asset_id"], now.isoformat()),
+            ).fetchone()
+        if old:
+            import json
+
+            prior = json.loads(old[0])
+            hours = (now - datetime.fromisoformat(old[1])).total_seconds() / 3600
+            if hours > 0 and row["data_ready"] and prior["data_ready"]:
+                row["rank_velocity_per_hour"] = (prior["rank"] - row["rank"]) / hours
+        row["version"] = "rank-v4-3"
+        row["threshold_version"] = settings.threshold_version
+    for name, field in factors.items():
+        values = []
+        for row in rows:
+            snapshot = by_id[row["asset_id"]]
+            value = getattr(snapshot.features, field)
+            component = {
+                "funding": "funding",
+                "oi_acceleration": "oi_history",
+                "taker_flow": "taker",
+                "order_book": "book",
+                "liquidity": "book",
+            }.get(name)
+            if (
+                value is not None
+                and row["data_ready"]
+                and (not component or component_usable(snapshot, component, now, settings))
+            ):
+                values.append((row, -abs(value) if name == "funding" else value))
+        for row, value in values:
+            rank = 1 + sum(v > value for _, v in values)
+            row["component_ranks"][name] = rank
+            row["component_percentiles"][name] = (len(values) - rank + 1) / len(values) * 100
+    return rows
+
+
+def pre_pump_signals(snapshot, regime, now, settings, store):
+    if snapshot.module != Module.ALT or not usable(snapshot, now, settings):
+        return []
+    f, t = snapshot.features, settings.rule_thresholds
+    flat = f.return_15m_pct is not None and abs(f.return_15m_pct) <= t["flat_price_pct"]
+    volume = f.relative_volume is not None and f.relative_volume >= t["rvol"]
+    spot = (
+        component_usable(snapshot, "candles", now, settings)
+        and f.spot_taker_buy_ratio is not None
+        and f.spot_taker_buy_ratio >= t["spot_buy_ratio"]
+    )
+    oi = (
+        component_usable(snapshot, "oi_history", now, settings)
+        and f.oi_change_5m_pct is not None
+        and f.oi_change_5m_pct >= t["oi_build_pct"]
+    )
+    funding_ready = (
+        component_usable(snapshot, "funding", now, settings) and f.funding_rate_pct is not None
+    )
+    cool = funding_ready and abs(f.funding_rate_pct) < t["funding_hot_pct"]
+    strength = (
+        f.relative_strength_15m_pct is not None
+        and f.relative_strength_15m_pct >= t["relative_strength_pct"]
+    )
+    patterns, groups, evidence = [], set(), []
+    if flat and volume:
+        patterns.append("A: 平价放量")
+        groups.update(("price", "spot_volume"))
+    if flat and oi and cool:
+        patterns.append("B: 温和价格 / 头寸建立")
+        groups.update(("price", "derivatives"))
+    if spot and f.spot_perp_structure == "SPOT_LED_HYPOTHESIS":
+        patterns.append("C: 现货先行")
+        groups.update(("spot_flow", "cross_venue"))
+    if oi and funding_ready and f.funding_rate_pct < 0 and (f.return_5m_pct or 0) > 0:
+        patterns.append("D: 空头挤压候选")
+        groups.update(("price", "derivatives"))
+    btc = store.snapshot(regime.btc_snapshot_id) if regime.btc_snapshot_id else None
+    btc_flat = (
+        btc
+        and btc.features.return_15m_pct is not None
+        and abs(btc.features.return_15m_pct) <= t["flat_price_pct"]
+    )
+    if btc_flat and strength and volume and cool:
+        patterns.append("E: 相对 BTC 轮动")
+        groups.update(("relative_strength", "spot_volume", "derivatives"))
+    old = [
+        s
+        for s in store.snapshot_range(now - timedelta(hours=1), now, snapshot.asset_id)
+        if s.id != snapshot.id
+        and s.component_times.get("book")
+        and component_usable(s, "book", now, settings)
+    ]
+    if old:
+        previous = old[-1].features
+        if (
+            flat
+            and spot
+            and f.spot_cvd_window is not None
+            and previous.spot_cvd_window is not None
+            and f.spot_cvd_window > previous.spot_cvd_window
+            and f.ask_depth_1pct_usd is not None
+            and previous.ask_depth_1pct_usd is not None
+            and f.ask_depth_1pct_usd < previous.ask_depth_1pct_usd
+        ):
+            patterns.append("F: 吸筹假设 / 卖方深度收缩")
+            groups.update(("price", "spot_flow", "order_book"))
+    if not patterns:
+        return []
+    if spot:
+        groups.add("spot_flow")
+    if strength:
+        groups.add("relative_strength")
+    context = asset_context(IntelligenceStore(store), snapshot.asset_id, now)
+    groups.update(context["evidence_groups"])
+    evidence.extend(patterns + context["supporting"])
+    contradictions = list(context["risks"])
+    if not cool:
+        contradictions.append("Funding 缺失或已过热")
+    if regime.risk_mode != "NORMAL":
+        contradictions.append("BTC 风险背景尚未允许强信号")
+    liquid = (
+        component_usable(snapshot, "book", now, settings)
+        and f.spread_bps is not None
+        and f.spread_bps <= t["max_spread_bps"]
+    )
+    strong = (
+        len(groups) >= t["strong_groups"]
+        and cool
+        and liquid
+        and regime.risk_mode == "NORMAL"
+        and not context["risks"]
+    )
+    signal = _signal(
+        snapshot,
+        regime,
+        now,
+        SignalKind.ENTRY_CANDIDATE if strong else SignalKind.WATCH,
+        "pre-pump-fusion",
+        "启动前证据融合",
+        evidence,
+        sorted(groups),
+        min(95, 15 * len(groups)),
+        contradictions,
+    )
+    signal.rule_version = "fusion-v4-3:" + settings.threshold_version
+    signal.signal_version = "signals-v4-3"
+    return [signal]

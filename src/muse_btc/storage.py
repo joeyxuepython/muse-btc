@@ -21,7 +21,7 @@ class Store:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
-            if db.execute("PRAGMA user_version").fetchone()[0] > 2:
+            if db.execute("PRAGMA user_version").fetchone()[0] > 3:
                 raise ValueError("Database schema is newer than this application; upgrade the app")
             db.executescript("""
                 PRAGMA journal_mode=WAL;
@@ -88,7 +88,33 @@ class Store:
                 CREATE TABLE IF NOT EXISTS runtime_state (
                     key TEXT PRIMARY KEY, payload TEXT NOT NULL
                 );
-                PRAGMA user_version=2;
+                CREATE TABLE IF NOT EXISTS intelligence_records (
+                    id TEXT PRIMARY KEY, kind TEXT NOT NULL, key TEXT NOT NULL,
+                    market_time TEXT NOT NULL, available_at TEXT NOT NULL,
+                    content_hash TEXT NOT NULL, payload TEXT NOT NULL,
+                    UNIQUE(kind,key,content_hash)
+                );
+                CREATE INDEX IF NOT EXISTS intelligence_pit
+                    ON intelligence_records(kind,key,available_at);
+                CREATE TABLE IF NOT EXISTS research_checks (
+                    id TEXT PRIMARY KEY, source TEXT NOT NULL, checked_at TEXT NOT NULL,
+                    succeeded INTEGER NOT NULL, message TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS research_alerts (
+                    document_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS trade_observations (
+                    venue TEXT NOT NULL, asset_id TEXT NOT NULL, trade_id TEXT NOT NULL,
+                    market_time TEXT NOT NULL, received_at TEXT NOT NULL,
+                    signed_notional REAL NOT NULL, raw_id TEXT NOT NULL,
+                    PRIMARY KEY(venue,asset_id,trade_id)
+                );
+                CREATE INDEX IF NOT EXISTS trades_asset_time
+                    ON trade_observations(venue,asset_id,market_time);
+                CREATE TABLE IF NOT EXISTS collection_leases (
+                    name TEXT PRIMARY KEY, token TEXT NOT NULL, expires_at TEXT NOT NULL
+                );
+                PRAGMA user_version=3;
             """)
 
     @contextmanager
