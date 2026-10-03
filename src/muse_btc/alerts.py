@@ -17,7 +17,7 @@ def publish_alert(store, signal, ranking, now, settings):
         level = "CRITICAL_RISK"
     elif signal.kind == SignalKind.ENTRY_CANDIDATE and len(set(signal.evidence_groups)) >= 3:
         level = "STRONG"
-    elif len(set(signal.evidence_groups)) >= 3:
+    elif len(set(signal.evidence_groups)) >= settings.rule_thresholds.get("setup_groups", 3):
         level = "SETUP"
     candidate = next(
         (

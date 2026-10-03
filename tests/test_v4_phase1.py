@@ -226,7 +226,7 @@ def test_additive_migration_preserves_old_json_and_backup(store, now, tmp_path):
     assert migrated.snapshot(old.id).canonical_asset_id is None
     with migrated.connect() as db:
         assert db.execute("SELECT payload FROM snapshots").fetchone()[0] == original
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
     destination = tmp_path / "backup.db"
     migrated.backup(destination)
     with sqlite3.connect(destination) as db:

@@ -2,13 +2,20 @@ import argparse
 import asyncio
 import json
 from datetime import datetime
+from pathlib import Path
 
 import uvicorn
 
 from .config import Settings
+from .context import import_context
+from .experiments import ranking_report, train_model
+from .intelligence import ContextInput, IntelligenceStore
+from .macro import MacroEngine
 from .models import utc_now
 from .providers import Providers
+from .research import ResearchEngine, ResearchReview
 from .service import Collector
+from .social import SocialEngine
 from .storage import Store
 from .validation import replay, validate_pending, validation_report
 
@@ -30,6 +37,23 @@ async def collect_once(settings: Settings, store: Store) -> dict:
         await providers.close()
 
 
+async def intelligence_once(settings, store, scope, sources=None):
+    providers = Providers(settings, store)
+    try:
+        if scope == "research":
+            return await ResearchEngine(store, settings, providers.public).check(sources)
+        if scope == "macro":
+            return await MacroEngine(store, settings, providers.public).collect()
+        if scope == "social":
+            return await SocialEngine(store, settings, providers).collect()
+        snapshots = await providers.memes()
+        for snapshot in snapshots:
+            store.save_snapshot(snapshot)
+        return {"snapshots": len(snapshots), "enabled": settings.enable_meme_discovery}
+    finally:
+        await providers.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Muse BTC / Altcoin / Meme monitoring")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -41,6 +65,26 @@ def main() -> None:
     backtest = sub.add_parser("replay", help="对真实归档快照进行时间点重放")
     backtest.add_argument("--start", required=True, type=parse_time)
     backtest.add_argument("--end", required=True, type=parse_time)
+    intelligence = sub.add_parser("intelligence", help="手动采集扩展来源，不创建定时任务")
+    intelligence.add_argument(
+        "--scope", required=True, choices=["macro", "meme", "social", "research"]
+    )
+    intelligence.add_argument(
+        "--sources",
+        nargs="+",
+        choices=["Glassnode", "Coinbase", "CoinShares", "Santiment", "arXiv"],
+    )
+    imported = sub.add_parser("import-context", help="导入有来源和时间的 JSON 证据")
+    imported.add_argument("path", type=Path)
+    email = sub.add_parser("import-email", help="导入研究邮件 EML；附件仅登记")
+    email.add_argument("path", type=Path)
+    review = sub.add_parser("review-research", help="提交中文研究结构与原文证据摘录")
+    review.add_argument("document_id")
+    review.add_argument("path", type=Path)
+    sub.add_parser("experiment-report", help="归档 TopK / Lead Time / 误报分析")
+    train = sub.add_parser("train", help="按时间分割与隔离标签窗口训练研究模型")
+    train.add_argument("--horizon", type=int, default=14400, choices=[14400, 86400, 259200, 604800])
+    sub.add_parser("framework", help="检查数据库与模块框架；不采集网络数据")
     args = parser.parse_args()
     settings = Settings()
     if args.command == "serve":
@@ -62,6 +106,59 @@ def main() -> None:
     elif args.command == "replay":
         print(
             json.dumps(replay(store, args.start, args.end, settings), ensure_ascii=False, indent=2)
+        )
+    elif args.command == "intelligence":
+        result = asyncio.run(intelligence_once(settings, store, args.scope, args.sources))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif args.command == "import-context":
+        if args.path.stat().st_size > settings.research_max_bytes:
+            parser.error("输入文件过大")
+        item = ContextInput.model_validate_json(args.path.read_text())
+        print(import_context(store, item, utc_now()).model_dump_json(indent=2))
+    elif args.command in {"import-email", "review-research"}:
+        engine = ResearchEngine(store, settings, None)
+        if args.path.stat().st_size > settings.research_max_bytes:
+            parser.error("输入文件过大")
+        if args.command == "import-email":
+            result = engine.import_email(args.path.read_bytes(), utc_now())
+        else:
+            result = engine.review(
+                args.document_id,
+                ResearchReview.model_validate_json(args.path.read_text()),
+                utc_now(),
+            )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif args.command == "experiment-report":
+        print(json.dumps(ranking_report(store, utc_now(), settings), ensure_ascii=False, indent=2))
+    elif args.command == "train":
+        archive = IntelligenceStore(store)
+        at = utc_now()
+        token = archive.acquire("model-training", at, 3600)
+        if not token:
+            parser.error("模型训练正在进行")
+        try:
+            result = train_model(store, at, settings, args.horizon)
+        finally:
+            archive.release("model-training", token)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif args.command == "framework":
+        with store.connect() as db:
+            schema = db.execute("PRAGMA user_version").fetchone()[0]
+        print(
+            json.dumps(
+                {
+                    "schema_version": schema,
+                    "phases": [2, 3, 4, 5, 6],
+                    "research_trigger": "MANUAL_ONLY",
+                    "network_collection_performed": False,
+                    "meme_enabled": settings.enable_meme_discovery,
+                    "social_enabled": settings.enable_social,
+                    "models": "REQUIRES_MATURE_HISTORY",
+                    "database": str(store.path),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
         )
 
 

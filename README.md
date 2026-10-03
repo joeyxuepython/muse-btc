@@ -1,6 +1,8 @@
 # MUSE · 加密市场研判与 Web 预警
 
-按[最新 V4 计划](docs/requirements/v4-latest-plan.md)开发：**BTC、ETH 独立监控，加 100 个动态 USDT 山寨币，共 102 个现货标的**。币安提供现货，OKX 提供合约。此分支实现 Phase 1；后续宏观、研究、邮箱、链上 Meme、社交与 ML 分阶段推进。Telegram 已取消。
+按[最新 V4 计划](docs/requirements/v4-latest-plan.md)开发：**BTC、ETH 独立监控，加 100 个动态 USDT 山寨币，共 102 个现货标的**。币安提供现货，OKX 提供合约。Phase 1 已实现，V0.2 增加 Phase 2–6 可运行框架；真实来源、凭据、历史样本和后续适配需云端验收。Telegram 已取消。
+
+新入口：网页“研究与扩展”。[云端运行步骤](docs/cloud-run.md) · [框架和未验收能力](docs/phase2-6-framework.md)。研究检查手动触发、首次只建基线，无新增定时任务。Meme / X 默认关闭，模型不自动晋级。
 
 ## 已实现的第一阶段
 

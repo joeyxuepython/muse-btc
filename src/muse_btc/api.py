@@ -1,23 +1,46 @@
 import asyncio
 import secrets
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from .alerts import alert_view, change_alert
 from .config import Settings
+from .context import import_context
+from .experiments import paid_evaluation, ranking_report, train_model
+from .intelligence import ContextInput, IntelligenceStore
+from .macro import MacroEngine
+from .microstructure import cvd_summary
 from .models import ProviderState, utc_now
 from .providers import Providers
+from .research import ResearchEngine, ResearchReview
 from .rules import market_regime, quote_usable, usable
 from .service import Collector, signal_view
+from .social import SocialEngine
 from .storage import Store
 from .validation import validation_report
 
 STATIC = Path(__file__).parent / "static"
+
+
+class ResearchCheckRequest(BaseModel):
+    sources: list[Literal["Glassnode", "Coinbase", "CoinShares", "Santiment", "arXiv"]] | None = (
+        None
+    )
+
+
+class EmailImportRequest(BaseModel):
+    content: str = Field(min_length=20, max_length=2000000)
+
+
+class TrainRequest(BaseModel):
+    horizon_seconds: Literal[14400, 86400, 259200, 604800] = 14400
 
 
 def create_app(settings: Settings | None = None, providers_factory=Providers) -> FastAPI:
@@ -25,6 +48,12 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
     store = Store(config.database_path)
     providers = providers_factory(config, store)
     collector = Collector(config, store, providers)
+    archive = IntelligenceStore(store)
+    # Custom provider factories used by integration tests may implement only market APIs.
+    public = getattr(providers, "public", None)
+    research = ResearchEngine(store, config, public)
+    macro = MacroEngine(store, config, public)
+    social = SocialEngine(store, config, providers)
 
     def ranking_views(now):
         rows = store.rankings(now)
@@ -51,7 +80,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
         yield
         await collector.stop()
 
-    app = FastAPI(title="Muse Crypto Intelligence", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Muse Crypto Intelligence", version="0.2.0", lifespan=lifespan)
     app.state.store, app.state.collector, app.state.settings = store, collector, config
 
     @app.middleware("http")
@@ -86,7 +115,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
         return {
             "status": "ok",
             "database": "ok",
-            "version": "0.1.0",
+            "version": "0.2.0",
             "collector_running": bool(collector.task and not collector.task.done()),
         }
 
@@ -163,7 +192,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             item["data_health"] = (
                 "FRESH" if item["data_usable"] else "DELAYED" if item["quote_fresh"] else "STALE"
             )
-            item["monitoring_active"] = snapshot.module != "MEME"
+            item["monitoring_active"] = snapshot.module != "MEME" or config.enable_meme_discovery
             item["trend"] = [c.close for c in snapshot.candles[-60:]]
             assets.append(item)
         statuses = []
@@ -268,6 +297,12 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             raise HTTPException(404, "标的不存在")
         return snapshot
 
+    @app.get("/api/assets/{asset_id}/cvd")
+    def cvd(asset_id: str, window_seconds: int = 3600):
+        if not 60 <= window_seconds <= 86400:
+            raise HTTPException(422, "CVD 窗口必须为 60–86400 秒")
+        return cvd_summary(store, asset_id, utc_now(), window_seconds)
+
     @app.get("/api/raw/{raw_id}")
     def raw_detail(raw_id: str):
         raw = store.raw(raw_id)
@@ -278,6 +313,120 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
     @app.get("/api/validation")
     def validation():
         return validation_report(store, config)
+
+    @app.get("/api/intelligence")
+    def intelligence_overview():
+        now = utc_now()
+        meme_engine = getattr(providers, "meme_engine", None)
+        return {
+            "as_of": now.isoformat(),
+            "macro": macro.summary(now),
+            "social": social.summary(now),
+            "meme": meme_engine.dashboard(now)
+            if meme_engine
+            else {"tokens": [], "holders": [], "early_buyers": [], "wallets": []},
+            "research_documents": [
+                r.model_dump(mode="json", exclude={"data": {"body"}})
+                for r in archive.records("research", now, limit=100)
+            ],
+            "research_notices": research.notices(),
+            "research_checks": archive.checks(),
+            "models": [
+                r.model_dump(
+                    mode="json", exclude={"data": {"training_snapshot_ids", "test_snapshot_ids"}}
+                )
+                for r in archive.records("model", now, limit=20)
+            ],
+            "phase_status": {
+                "2": "FRAMEWORK_REQUIRES_SOURCE_ACCEPTANCE",
+                "3": "RULES_RESEARCH_ONLY",
+                "4": "PARTIAL_PUBLIC_DISCOVERY",
+                "5": "REQUIRES_CREDENTIALS_OR_IMPORT",
+                "6": "REQUIRES_MATURE_HISTORY",
+            },
+            "scheduled_research": False,
+            "meme_collection_enabled": config.enable_meme_discovery,
+            "social_collection_enabled": config.enable_social,
+        }
+
+    @app.get("/api/evidence/{kind}")
+    def evidence(kind: str, as_of: datetime | None = None, limit: int = 100):
+        if as_of and (not as_of.tzinfo or as_of > utc_now()):
+            raise HTTPException(422, "as_of 必须含时区且不能在未来")
+        return archive.records(kind, as_of or utc_now(), limit=limit)
+
+    @app.post("/api/context/import")
+    def context_import(item: ContextInput):
+        try:
+            return import_context(store, item, utc_now())
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.post("/api/intelligence/collect/{scope}")
+    async def collect_intelligence(scope: Literal["macro", "social", "meme"]):
+        if not public:
+            raise HTTPException(503, "当前 provider 未提供公开研究接口")
+        if scope == "macro":
+            return await macro.collect()
+        if scope == "social":
+            return await social.collect()
+        snapshots = await providers.memes()
+        for snapshot in snapshots:
+            store.save_snapshot(snapshot)
+        return {"snapshots": len(snapshots), "enabled": config.enable_meme_discovery}
+
+    @app.post("/api/research/check")
+    async def check_research(item: ResearchCheckRequest):
+        if not public:
+            raise HTTPException(503, "当前 provider 未提供研究接口")
+        return await research.check(item.sources)
+
+    @app.get("/api/research/documents/{document_id}")
+    def research_document(document_id: str):
+        result = archive.by_id(document_id, utc_now())
+        if not result or result.kind != "research":
+            raise HTTPException(404, "研究文档不存在")
+        return result
+
+    @app.post("/api/research/documents/{document_id}/review")
+    def review_research(document_id: str, item: ResearchReview):
+        try:
+            return research.review(document_id, item, utc_now())
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.post("/api/research/import-email")
+    def email_import(item: EmailImportRequest):
+        try:
+            return research.import_email(item.content.encode(), utc_now())
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(422, "邮件格式、来源或原始链接无法验证") from exc
+
+    @app.get("/api/macro/reactions")
+    def macro_reactions():
+        return macro.event_reactions(utc_now())
+
+    @app.get("/api/experiments/report")
+    async def experiment_report():
+        return await asyncio.to_thread(ranking_report, store, utc_now(), config)
+
+    @app.post("/api/experiments/train")
+    async def experiment_train(item: TrainRequest):
+        at = utc_now()
+        token = archive.acquire("model-training", at, 3600)
+        if not token:
+            return {"status": "BUSY"}
+        try:
+            return await asyncio.to_thread(train_model, store, at, config, item.horizon_seconds)
+        finally:
+            archive.release("model-training", token)
+
+    @app.post("/api/experiments/paid-evaluation")
+    def evaluate_paid_source(item: dict):
+        try:
+            return paid_evaluation(store, item, utc_now())
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(422, "付费来源评估格式无效或样本不足") from exc
 
     @app.get("/api/export")
     def export():

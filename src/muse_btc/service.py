@@ -4,6 +4,8 @@ from datetime import datetime
 
 from .alerts import publish_alert
 from .config import Settings
+from .fusion import enrich_rankings, pre_pump_signals
+from .microstructure import archive_snapshot_trades
 from .models import (
     Module,
     ProviderState,
@@ -35,8 +37,6 @@ class Collector:
 
     def initialise_statuses(self) -> None:
         for name, coverage in [
-            ("Macro", "宏观事件、共识值、修订版本与资金流"),
-            ("Research", "Glassnode 等公开报告；尚未接入解析与订阅"),
             ("Liquidations", "完整清算记录；尚未接入 WebSocket 自行积累"),
             ("Wallet Intelligence", "钱包关联、聪明钱与独立持有人识别"),
             ("Solana Security", "mint/freeze 权限、持仓与 LP 风险；尚未接入 RPC"),
@@ -48,7 +48,21 @@ class Collector:
             )
         for name in ("DEX Screener", "GoPlus"):
             self.providers.status(
-                name, ProviderState.DISABLED, "已停止新采集、分析和提醒；保留历史", "历史归档"
+                name,
+                ProviderState.NEEDS_VERIFICATION
+                if self.settings.enable_meme_discovery
+                else ProviderState.DISABLED,
+                "Phase 4 框架；等待云端按配置采集",
+                "独立 Meme 发现池",
+            )
+        for name, coverage in [
+            ("Macro", "公开宏观、ETF、稳定币及版本归档"),
+            ("Research", "公开报告 / 邮件导入 / 中文审阅；手动触发检查"),
+            ("Social", "X API 或导入；需要凭据与历史样本"),
+            ("ML Ranking", "离线训练 / 校准 / 样本外验证；不自动升级"),
+        ]:
+            self.providers.status(
+                name, ProviderState.NEEDS_VERIFICATION, "框架已接入，等待云端数据与验收", coverage
             )
         self.providers.status(
             "Binance Futures", ProviderState.DISABLED, "V4 合约统一使用 OKX；保留旧历史", "历史归档"
@@ -79,6 +93,7 @@ class Collector:
         async with self.lock:
             try:
                 binance = await self.providers.binance()
+                memes = await self.providers.memes() if self.settings.enable_meme_discovery else []
                 now = utc_now()
                 eth = next((s for s in binance if s.module == Module.ETH), None)
                 btc = next((s for s in binance if s.module == Module.BTC), None)
@@ -98,7 +113,7 @@ class Collector:
                         <= self.settings.time_alignment_seconds
                     )
 
-                for snapshot in binance:
+                for snapshot in binance + memes:
                     snapshot.decision_at = now
                     snapshot.features.relative_strength_15m_pct = None
                     snapshot.features.relative_strength_eth_15m_pct = None
@@ -121,6 +136,13 @@ class Collector:
                             snapshot.features.return_15m_pct - eth.features.return_15m_pct
                         )
                     try:
+                        if self.settings.enable_intelligence and snapshot.module != Module.MEME:
+                            try:
+                                archive_snapshot_trades(
+                                    self.store, snapshot, self.store.universe(now)
+                                )
+                            except (ValueError, KeyError, TypeError, OverflowError):
+                                snapshot.quality_issues.append("TRADE_ARCHIVE_INVALID")
                         self.store.save_snapshot(snapshot)
                         saved.append(snapshot)
                     except ValueError:
@@ -128,6 +150,8 @@ class Collector:
                 regime = market_regime(btc if btc in saved else None, now, self.settings)
                 self.store.save_regime(regime)
                 ranking = rank_assets(saved, self.store.rankings(now), now, self.settings)
+                if self.settings.enable_intelligence:
+                    ranking = enrich_rankings(ranking, saved, self.store, now, self.settings)
                 self.store.save_rankings(ranking, now)
                 signal_count = self._process_signals(saved, regime, now)
                 outcomes = validate_pending(self.store, now, self.settings)
@@ -204,7 +228,10 @@ class Collector:
                     publish_alert(self.store, invalidated, None, now, self.settings)
                     count += 1
         for snapshot in snapshots:
-            for signal in evaluate(snapshot, regime, now, self.settings):
+            candidates = evaluate(snapshot, regime, now, self.settings)
+            if self.settings.enable_intelligence:
+                candidates += pre_pump_signals(snapshot, regime, now, self.settings, self.store)
+            for signal in candidates:
                 rank = next(
                     (r for r in self.store.rankings(now) if r["asset_id"] == snapshot.asset_id),
                     None,

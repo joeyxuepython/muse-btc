@@ -95,6 +95,16 @@ def depth_features(book: dict, features: Features) -> None:
     features.ask_depth_1pct_usd = ask_depth
     total = bid_depth + ask_depth
     features.depth_imbalance = (bid_depth - ask_depth) / total if total > 0 else None
+    for band in (0.5, 1, 2, 5):
+        fraction = band / 100
+        bid = sum(p * q for p, q in bids if p >= mid * (1 - fraction))
+        ask = sum(p * q for p, q in asks if p <= mid * (1 + fraction))
+        features.spot_depth_bands[str(band)] = {
+            "observed_bid_usd": bid,
+            "observed_ask_usd": ask,
+            "complete_band": min(p for p, _ in bids) <= mid * (1 - fraction)
+            and max(p for p, _ in asks) >= mid * (1 + fraction),
+        }
 
 
 def cross_venue_features(features, price, times, now, settings):

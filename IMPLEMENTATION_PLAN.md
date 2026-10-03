@@ -1,5 +1,7 @@
 # V4 implementation and acceptance
 
+Current Phase 2–6 scope is a runnable framework for the user's cloud computer, not immediate research collection. See [framework status](docs/phase2-6-framework.md) and [cloud setup](docs/cloud-run.md). Public adapters, append-only evidence, manual research review, optional discovery/social inputs and gated offline experiments are connected. Real source acceptance, complete RPC streams, LLM extraction and mature historical validation remain separate gates. No daily research schedule is created. Delivery branch: `feat/v4-phase2-6`.
+
 Authoritative source: [complete V4](docs/requirements/v4-latest-plan.md). Start with repo audit/design and official capability verification; then implement Phase 1 autonomously. Original configuration, data and local documentation are preserved. Do not merge the review branch or change Binance proxy configuration as part of this work.
 
 Phase 1 acceptance: CORE BTC/ETH + 100 dynamic altcoins; exact registry and daily bounded turnover/pins; Binance spot quotes/details and OKX history/taker/ratios; additive storage and persistent membership; tiered collection and data health; rank/score history; explained signals and durable Web Alert Center; forward measurements/replay; packaging, backup and local integration validation. Verify real response shape and timestamps; report unavailable metrics and coverage. Long unattended availability and investment efficacy require elapsed live operation, not short smoke tests.

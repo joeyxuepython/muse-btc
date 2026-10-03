@@ -1,6 +1,6 @@
 [project]
 name = "muse-btc"
-version = "0.1.0"
+version = "0.2.0"
 description = "Evidence-based BTC, altcoin and DEX meme monitoring"
 requires-python = ">=3.12"
 dependencies = [

@@ -197,7 +197,7 @@ function renderOverview() {
     .join("");
   $("#cycle-status").textContent = overview.collector.busy
     ? "正在采集"
-    : `每 ${overview.collector.poll_seconds}s 自动采集`;
+    : overview.collector.enabled ? `每 ${overview.collector.poll_seconds}s 自动采集` : "自动采集未启用";
   const finished = overview.collector.last_result.finished_at;
   $("#last-updated").textContent = finished
     ? "最近采集 " + time(finished)
@@ -339,7 +339,8 @@ function changeView(next) {
     HEATMAP: "机会热图",
     ALERTS: "Web 预警中心",
     ALT: "山寨币雷达",
-    MEME: "DEX 历史归档",
+    MEME: "Meme 发现池",
+    INTELLIGENCE: "研究与扩展",
     SIGNALS: "提醒记录",
     VALIDATION: "历史验证",
   };
@@ -353,7 +354,8 @@ function changeView(next) {
   $$("[data-filter]").forEach((b) =>
     b.classList.toggle("selected", b.dataset.filter === filter),
   );
-  const dedicated = ["RANKING", "HEATMAP", "ALERTS"].includes(view);
+  const dedicated = ["RANKING", "HEATMAP", "ALERTS", "INTELLIGENCE"].includes(view);
+  $("#intelligence-view").hidden = view !== "INTELLIGENCE";
   $("#ranking-view").hidden = view !== "RANKING";
   $("#heatmap-view").hidden = view !== "HEATMAP";
   $("#alerts-view").hidden = view !== "ALERTS";
@@ -369,6 +371,7 @@ function changeView(next) {
     renderV4();
   }
   if (view === "VALIDATION") loadValidation();
+  if (view === "INTELLIGENCE") loadIntelligence();
 }
 $("#mobile-view").addEventListener("change", (event) =>
   changeView(event.target.value),
