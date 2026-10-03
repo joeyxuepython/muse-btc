@@ -6,6 +6,7 @@ from pathlib import Path
 
 import uvicorn
 
+from .btc_data import BTCDataEngine
 from .config import Settings
 from .context import import_context
 from .experiments import ranking_report, train_model
@@ -44,12 +45,22 @@ async def intelligence_once(settings, store, scope, sources=None):
             return await ResearchEngine(store, settings, providers.public).check(sources)
         if scope == "macro":
             return await MacroEngine(store, settings, providers.public).collect()
+        if scope == "btc":
+            return await BTCDataEngine(store, settings, providers.public).collect()
         if scope == "social":
             return await SocialEngine(store, settings, providers).collect()
         snapshots = await providers.memes()
         for snapshot in snapshots:
             store.save_snapshot(snapshot)
         return {"snapshots": len(snapshots), "enabled": settings.enable_meme_discovery}
+    finally:
+        await providers.close()
+
+
+async def free_data_once(settings, store, scope, seconds):
+    providers = Providers(settings, store)
+    try:
+        return await BTCDataEngine(store, settings, providers.public).collect(scope, seconds)
     finally:
         await providers.close()
 
@@ -67,13 +78,18 @@ def main() -> None:
     backtest.add_argument("--end", required=True, type=parse_time)
     intelligence = sub.add_parser("intelligence", help="手动采集扩展来源，不创建定时任务")
     intelligence.add_argument(
-        "--scope", required=True, choices=["macro", "meme", "social", "research"]
+        "--scope", required=True, choices=["macro", "meme", "social", "research", "btc"]
     )
     intelligence.add_argument(
         "--sources",
         nargs="+",
         choices=["Glassnode", "Coinbase", "CoinShares", "Santiment", "arXiv"],
     )
+    free_data = sub.add_parser("free-data", help="手动归档免费链上、期权、宏观与采样清算")
+    free_data.add_argument(
+        "--scope", choices=["all", "onchain", "options", "macro", "liquidations"], default="all"
+    )
+    free_data.add_argument("--seconds", type=int, default=10, help="清算实际监听秒数，1–3600")
     imported = sub.add_parser("import-context", help="导入有来源和时间的 JSON 证据")
     imported.add_argument("path", type=Path)
     email = sub.add_parser("import-email", help="导入研究邮件 EML；附件仅登记")
@@ -110,6 +126,13 @@ def main() -> None:
     elif args.command == "intelligence":
         result = asyncio.run(intelligence_once(settings, store, args.scope, args.sources))
         print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif args.command == "free-data":
+        if not 1 <= args.seconds <= 3600:
+            parser.error("--seconds 必须为 1–3600")
+        result = asyncio.run(free_data_once(settings, store, args.scope, args.seconds))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if result["status"] not in {"COMPLETE", "BUSY"}:
+            raise SystemExit(1)
     elif args.command == "import-context":
         if args.path.stat().st_size > settings.research_max_bytes:
             parser.error("输入文件过大")

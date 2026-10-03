@@ -115,6 +115,14 @@ class Settings(BaseSettings):
     stablecoins_url: str = "https://stablecoins.llama.fi"
     fred_url: str = "https://fred.stlouisfed.org"
     etf_url: str = "https://farside.co.uk/btc/"
+    # Free BTC data are collected only by an explicit CLI/API request.
+    coinmetrics_url: str = "https://community-api.coinmetrics.io/v4"
+    bgeometrics_url: str = "https://bitcoin-data.com/v1"
+    deribit_url: str = "https://www.deribit.com/api/v2"
+    btc_history_days: int = Field(default=365, ge=8, le=1460)
+    btc_onchain_refresh_seconds: int = Field(default=86400, ge=86400)
+    btc_options_refresh_seconds: int = Field(default=300, ge=60)
+    deribit_greeks_limit: int = Field(default=12, ge=0, le=40)
     x_bearer_token: SecretStr | None = None
     x_query: str = "(BTC OR ETH OR crypto) -is:retweet lang:en"
     meme_discovery_batch_size: int = Field(default=20, ge=1, le=100)

@@ -38,6 +38,8 @@
 
 ## 宏观与市场口径
 
+免费 BTC 来源补充见 [free-btc-data.md](free-btc-data.md)：日线 MVRV、延迟 SOPR 与持有人成本、Deribit 期权及限额 Greeks、Binance 采样清算及监听窗口均通过显式命令归档。来源仍需云端网络与长期覆盖验收，数据尚未融合到 BTC 风险规则。
+
 FRED 保留观测与获取日期；最新修订不能作为历史 vintage。`DTWEXBGS` 是广义贸易加权美元指数，不是 DXY。CME FedWatch、ISM、MOVE、Gold 与事件共识默认缺失。WALCL / WTREGEN 为百万美元，RRPONTSYD 为十亿美元；净流动性代理 `WALCL - TGA - RRP` 不表示全部可投资资金。四币供应变化均值仅在数据齐备时产生；Mint/Burn 与交易所供应未推断。
 
 ETF 只解析 Date / Total 栏的已公布净流量，破折号保持缺失，不推断持仓或 AUM。事件必须含 release_time、units、vintage、actual，可缺 consensus；发布前不能录入实际值，BTC 反应只取归档附近的采样。

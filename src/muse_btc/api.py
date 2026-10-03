@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .alerts import alert_view, change_alert
+from .btc_data import BTCDataEngine
 from .config import Settings
 from .context import import_context
 from .experiments import paid_evaluation, ranking_report, train_model
@@ -43,6 +44,11 @@ class TrainRequest(BaseModel):
     horizon_seconds: Literal[14400, 86400, 259200, 604800] = 14400
 
 
+class FreeDataRequest(BaseModel):
+    scope: Literal["all", "onchain", "options", "macro", "liquidations"] = "all"
+    liquidation_seconds: int = Field(default=10, ge=1, le=60)
+
+
 def create_app(settings: Settings | None = None, providers_factory=Providers) -> FastAPI:
     config = settings or Settings()
     store = Store(config.database_path)
@@ -53,6 +59,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
     public = getattr(providers, "public", None)
     research = ResearchEngine(store, config, public)
     macro = MacroEngine(store, config, public)
+    btc_data = BTCDataEngine(store, config, public)
     social = SocialEngine(store, config, providers)
 
     def ranking_views(now):
@@ -321,6 +328,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
         return {
             "as_of": now.isoformat(),
             "macro": macro.summary(now),
+            "btc": btc_data.summary(now),
             "social": social.summary(now),
             "meme": meme_engine.dashboard(now)
             if meme_engine
@@ -363,17 +371,33 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             raise HTTPException(422, str(exc)) from exc
 
     @app.post("/api/intelligence/collect/{scope}")
-    async def collect_intelligence(scope: Literal["macro", "social", "meme"]):
+    async def collect_intelligence(scope: Literal["macro", "social", "meme", "btc"]):
         if not public:
             raise HTTPException(503, "当前 provider 未提供公开研究接口")
         if scope == "macro":
             return await macro.collect()
+        if scope == "btc":
+            return await btc_data.collect()
         if scope == "social":
             return await social.collect()
         snapshots = await providers.memes()
         for snapshot in snapshots:
             store.save_snapshot(snapshot)
         return {"snapshots": len(snapshots), "enabled": config.enable_meme_discovery}
+
+    @app.get("/api/btc")
+    def btc_free_data():
+        return btc_data.summary(utc_now())
+
+    @app.get("/api/btc/onchain/{metric}")
+    def btc_onchain_series(metric: str, source: Literal["Coin Metrics", "BGeometrics"]):
+        return btc_data.series(utc_now(), source, metric)
+
+    @app.post("/api/btc/collect")
+    async def collect_btc_free_data(item: FreeDataRequest):
+        if not public:
+            raise HTTPException(503, "当前 provider 未提供公开数据接口")
+        return await btc_data.collect(item.scope, item.liquidation_seconds)
 
     @app.post("/api/research/check")
     async def check_research(item: ResearchCheckRequest):

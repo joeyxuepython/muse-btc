@@ -42,6 +42,28 @@ function renderIntelligence() {
     html += '<h3>稳定币</h3>' + intelTable(["资产", "供应", "7 日变化", "30 日变化"], m.stablecoins.map(r => [escapeHtml(r.data.symbol), price(r.data.supply_usd), pct(r.data.change_7d_pct), pct(r.data.change_30d_pct)]));
     html += '<h3>ETF</h3>' + intelTable(["日期", "资产", "净流入"], m.etf.map(r => [time(r.market_time), escapeHtml(r.data.asset), price(r.data.net_flow_usd)]));
     html += `<p>缺失：${escapeHtml(m.missing.join("、"))}</p><p>过期：${escapeHtml(m.stale.join("、"))}</p>`;
+  } else if (intelligenceTab === "btc") {
+    const b = d.btc;
+    html = '<p>手动归档免费来源。持有人成本与 SOPR 延迟七天；期权仅覆盖 Deribit，清算为监听期间的采样。</p><div class="actions"><button class="button primary" data-btc-scope="all">采集免费数据</button><button class="button secondary" data-btc-scope="onchain">仅采集链上</button><button class="button secondary" data-btc-scope="options">仅采集期权</button><button class="button secondary" data-btc-scope="liquidations">监听清算 30 秒</button></div>';
+    html += '<h3>BTC 链上</h3>' + intelTable(["指标 / 来源", "最新值 / 单位", "观察日期", "状态 / 历史点数"], b.onchain.map(r => [
+      `${escapeHtml(r.metric)}<small>${escapeHtml(r.source)}</small>${sourceLink(r.source_url)}`,
+      `${format(r.value,4)} ${escapeHtml(r.unit)}`, time(r.observation_date), `${escapeHtml(r.status)} / ${r.observations}`]));
+    const o = b.options;
+    html += '<h3>BTC 期权</h3>';
+    if (o) {
+      html += `<p>${escapeHtml(o.status)} · 归档 ${o.data.chain.length} 项 · Greeks ${o.data.greeks_observed}/${o.data.chain.length} · 获取于 ${time(o.available_at)}</p>`;
+      html += intelTable(["合约 / 到期", "Mark IV", "OI（BTC）", "Delta / Gamma / Vega"], o.data.chain.slice(0,80).map(r => [
+        `${escapeHtml(r.instrument)}<small>${time(r.expiry)}</small>`, pct(r.mark_iv_pct), format(r.open_interest_btc,4),
+        r.greeks ? `${format(r.greeks.delta,4)} / ${format(r.greeks.gamma,6)} / ${format(r.greeks.vega,4)}` : "未采样"]));
+      if (o.data.chain.length > 80) html += '<p>表格展示前 80 项。</p>';
+    } else html += '<p class="empty">尚无已归档期权数据。</p>';
+    html += '<h3>采样清算</h3>' + intelTable(["资产 / 被清算方向", "快照累计成交额（USDT）", "成交时间"], b.liquidations.events.map(r => [
+      `${escapeHtml(r.data.symbol)} / ${escapeHtml(r.data.liquidated_position)}`, format(r.data.snapshot_filled_notional_quote,2), time(r.market_time)]));
+    html += intelTable(["监听状态", "开始 / 结束", "实际秒数 / 新事件"], b.liquidations.windows.map(r => [
+      escapeHtml(r.data.status), `${time(r.data.connected_at)} / ${time(r.data.ended_at)}`, `${format(r.data.connected_seconds,1)} / ${r.data.new_events}`]));
+    html += '<h3>来源检查</h3>' + intelTable(["来源 / 指标", "结果", "时间 / 原因"], b.checks.map(r => [
+      `${escapeHtml(r.source)} / ${escapeHtml(r.metric || "liquidations")}`, `${escapeHtml(r.status)} ${escapeHtml(r.data_status || "")}`, `${time(r.checked_at)}<small>${escapeHtml(r.reason || r.error || (r.errors || []).map(e => `${e.instrument}: ${e.reason}`).join("；"))}</small>`]));
+    html += `<p>${escapeHtml(b.limitations.join("；"))}</p><p>宏观、稳定币和 ETF 结果在“宏观与资金流”查看。</p>`;
   } else if (intelligenceTab === "meme") {
     html = `<p>独立发现池不占 100 币名额。采集开关：${d.meme_collection_enabled ? "已启用" : "未启用"}。公开 profile 覆盖有限，未知风险不视为安全。</p><button class="button primary" data-intel-action="meme">采集一批发现池</button>`;
     html += intelTable(["资产 / 合约", "发现评分", "Rug 风险", "流动性", "首次发现 / 涨幅"], d.meme.tokens.map(r => [
@@ -79,6 +101,11 @@ document.addEventListener("click", async event => {
   if (!button) return;
   try {
     if (button.dataset.intelTab) { intelligenceTab = button.dataset.intelTab; renderIntelligence(); }
+    if (button.dataset.btcScope) {
+      button.disabled = true;
+      const result = await (await api("/api/btc/collect", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({scope:button.dataset.btcScope,liquidation_seconds:button.dataset.btcScope === "liquidations" ? 30 : 10})})).json();
+      notice(JSON.stringify(result)); await loadIntelligence();
+    }
     if (button.dataset.intelAction) {
       const scope = button.dataset.intelAction;
       button.disabled = true;

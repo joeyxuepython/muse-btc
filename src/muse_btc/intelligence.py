@@ -29,6 +29,10 @@ KINDS = {
     "social_thesis",
     "model",
     "paid_evaluation",
+    "onchain",
+    "options",
+    "liquidation",
+    "liquidation_window",
 }
 
 
