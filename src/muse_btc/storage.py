@@ -87,8 +87,18 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS alerts_asset_rule
                     ON web_alerts(asset_id, rule_id);
+                CREATE INDEX IF NOT EXISTS alerts_updated ON web_alerts(last_updated DESC,id);
+                CREATE INDEX IF NOT EXISTS alerts_level_updated
+                    ON web_alerts(json_extract(payload,'$.level'),last_updated DESC,id);
                 CREATE TABLE IF NOT EXISTS web_alert_events (
                     id TEXT PRIMARY KEY, alert_id TEXT NOT NULL,
+                    event_at TEXT NOT NULL, payload TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS alert_events_alert_time
+                    ON web_alert_events(alert_id,event_at);
+                CREATE TABLE IF NOT EXISTS alert_notifications (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    notification_id TEXT NOT NULL UNIQUE, alert_id TEXT NOT NULL,
                     event_at TEXT NOT NULL, payload TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS runtime_state (
@@ -147,6 +157,36 @@ class Store:
                     COMMIT;
                 """)
             db.execute("PRAGMA user_version=4")
+            # Seed once, in the same transaction as the durable generation marker.
+            # Old alert rows cannot reconstruct historical escalation prices.
+            initialized = db.execute(
+                "INSERT OR IGNORE INTO runtime_state VALUES (?,?)",
+                ("alert_notification_feed", json.dumps({"generation": new_id()})),
+            ).rowcount
+            if initialized:
+                rows = db.execute(
+                    "SELECT payload FROM web_alerts WHERE json_extract(payload,'$.level') "
+                    "IN ('STRONG','CRITICAL_RISK') ORDER BY last_updated,id"
+                ).fetchall()
+                for row in rows:
+                    legacy = json.loads(row[0])
+                    legacy.update(
+                        notification_id="legacy:" + legacy["id"],
+                        notification_at=legacy.get("notification_revision", legacy["last_updated"]),
+                        notification_price=None,
+                        escalated_price=None,
+                        price_provenance="LEGACY_UNKNOWN",
+                    )
+                    db.execute(
+                        "INSERT INTO alert_notifications "
+                        "(notification_id,alert_id,event_at,payload) VALUES (?,?,?,?)",
+                        (
+                            legacy["notification_id"],
+                            legacy["id"],
+                            legacy["notification_at"],
+                            json.dumps(legacy, allow_nan=False),
+                        ),
+                    )
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -226,18 +266,46 @@ class Store:
             row = db.execute("SELECT payload FROM snapshots WHERE id=?", (snapshot_id,)).fetchone()
         return Snapshot.model_validate_json(row[0]) if row else None
 
-    def latest_snapshots(self, as_of: datetime) -> list[Snapshot]:
+    def snapshots_by_ids(self, snapshot_ids: list[str]) -> dict[str, Snapshot]:
+        result = {}
+        ids = list(dict.fromkeys(snapshot_ids))
+        with self.connect() as db:
+            for start in range(0, len(ids), 500):
+                batch = ids[start : start + 500]
+                rows = db.execute(
+                    "SELECT payload FROM snapshots WHERE id IN ("
+                    + ",".join("?" for _ in batch)
+                    + ")",
+                    batch,
+                ).fetchall()
+                for row in rows:
+                    snapshot = Snapshot.model_validate_json(row[0])
+                    result[snapshot.id] = snapshot
+        return result
+
+    def latest_snapshots(
+        self, as_of: datetime, *, asset_ids: list[str] | None = None
+    ) -> list[Snapshot]:
+        if asset_ids == []:
+            return []
+        requested = "SELECT DISTINCT asset_id FROM snapshots"
+        args: list = []
+        if asset_ids is not None:
+            ids = list(dict.fromkeys(asset_ids))
+            requested = "VALUES " + ",".join("(?)" for _ in ids)
+            args.extend(ids)
+        args.append(stamp(as_of))
         with self.connect() as db:
             rows = db.execute(
-                """
-                SELECT s.payload FROM snapshots s JOIN (
-                    SELECT rowid AS sequence, ROW_NUMBER() OVER (
-                        PARTITION BY asset_id ORDER BY available_at DESC, rowid DESC
-                    ) AS rank FROM snapshots WHERE available_at<=?
-                ) latest ON s.rowid=latest.sequence WHERE latest.rank=1
+                f"""
+                WITH assets(asset_id) AS ({requested})
+                SELECT s.payload FROM assets a JOIN snapshots s ON s.rowid=(
+                    SELECT rowid FROM snapshots WHERE asset_id=a.asset_id AND available_at<=?
+                    ORDER BY available_at DESC,rowid DESC LIMIT 1
+                )
                 ORDER BY s.asset_id
             """,
-                (stamp(as_of),),
+                args,
             ).fetchall()
         return [Snapshot.model_validate_json(row[0]) for row in rows]
 
@@ -465,12 +533,112 @@ class Store:
                     ),
                 )
 
-    def alerts(self) -> list[dict]:
+    def alerts(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+        level: str | None = None,
+        since: datetime | None = None,
+        unread: bool = False,
+        pinned: bool = False,
+        now: datetime | None = None,
+    ) -> list[dict]:
+        conditions, args = [], []
+        if level:
+            conditions.append("json_extract(payload,'$.level')=?")
+            args.append(level)
+        if since:
+            conditions.append(
+                "julianday(COALESCE(json_extract(payload,'$.notification_revision'),"
+                "json_extract(payload,'$.first_seen')))>=julianday(?)"
+            )
+            args.append(stamp(since))
+        if pinned:
+            conditions.append("json_extract(payload,'$.pinned')=1")
+        if unread:
+            if now is None:
+                raise ValueError("Unread filtering requires a current time")
+            conditions.extend(
+                [
+                    "json_extract(payload,'$.read_at') IS NULL",
+                    "json_extract(payload,'$.resolved_at') IS NULL",
+                    "julianday(json_extract(payload,'$.expires_at'))>julianday(?)",
+                ]
+            )
+            args.append(stamp(now))
+        query = "SELECT payload FROM web_alerts"
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY last_updated DESC,id"
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            args.extend([limit, offset])
         with self.connect() as db:
-            rows = db.execute(
-                "SELECT payload FROM web_alerts ORDER BY last_updated DESC"
-            ).fetchall()
+            rows = db.execute(query, args).fetchall()
         return [json.loads(r[0]) for r in rows]
+
+    def alerts_by_ids(self, alert_ids: list[str]) -> dict[str, dict]:
+        result = {}
+        ids = list(dict.fromkeys(alert_ids))
+        with self.connect() as db:
+            for start in range(0, len(ids), 500):
+                batch = ids[start : start + 500]
+                rows = db.execute(
+                    "SELECT id,payload FROM web_alerts WHERE id IN ("
+                    + ",".join("?" for _ in batch)
+                    + ")",
+                    batch,
+                ).fetchall()
+                result.update({row[0]: json.loads(row[1]) for row in rows})
+        return result
+
+    def alert(self, alert_id: str) -> dict | None:
+        return self.alerts_by_ids([alert_id]).get(alert_id)
+
+    def active_alert(self, asset_id: str, rule_id: str, now: datetime) -> dict | None:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT payload FROM web_alerts WHERE asset_id=? AND rule_id=? "
+                "AND json_extract(payload,'$.resolved_at') IS NULL "
+                "AND julianday(json_extract(payload,'$.expires_at'))>julianday(?) "
+                "ORDER BY last_updated DESC,id LIMIT 1",
+                (asset_id, rule_id, stamp(now)),
+            ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def notification_page(
+        self, after: int, limit: int, through: int | None = None, generation: str | None = None
+    ) -> dict:
+        with self.connect() as db:
+            actual_generation = json.loads(
+                db.execute(
+                    "SELECT payload FROM runtime_state WHERE key='alert_notification_feed'"
+                ).fetchone()[0]
+            )["generation"]
+            if generation is not None and generation != actual_generation:
+                raise ValueError("通知库已更换，请从 after=0 重新读取，并按 notification_id 去重")
+            if after and generation is None:
+                raise ValueError("续传需要上次返回的 generation")
+            upper = db.execute(
+                "SELECT COALESCE(MAX(sequence),0) FROM alert_notifications"
+            ).fetchone()[0]
+            boundary = upper if through is None else through
+            if after < 0 or limit < 1 or after > boundary or boundary > upper:
+                raise ValueError("游标超出通知库范围，请核查数据库恢复情况")
+            rows = db.execute(
+                "SELECT sequence,payload FROM alert_notifications "
+                "WHERE sequence>? AND sequence<=? ORDER BY sequence LIMIT ?",
+                (after, boundary, limit + 1),
+            ).fetchall()
+        items = [dict(json.loads(row[1]), sequence=row[0]) for row in rows[:limit]]
+        return {
+            "generation": actual_generation,
+            "items": items,
+            "next_cursor": items[-1]["sequence"] if items else after,
+            "upper_cursor": boundary,
+            "has_more": len(rows) > limit,
+        }
 
     def alert_events(self, alert_id: str) -> list[dict]:
         with self.connect() as db:
@@ -495,8 +663,24 @@ class Store:
             if event:
                 db.execute(
                     "INSERT INTO web_alert_events VALUES (?,?,?,?)",
-                    (new_id(), alert["id"], event["event_at"], json.dumps(event)),
+                    (
+                        event.get("notification_id", new_id()),
+                        alert["id"],
+                        event["event_at"],
+                        json.dumps(event, allow_nan=False),
+                    ),
                 )
+                if event.get("notification_id") and alert["level"] in ("STRONG", "CRITICAL_RISK"):
+                    db.execute(
+                        "INSERT INTO alert_notifications "
+                        "(notification_id,alert_id,event_at,payload) VALUES (?,?,?,?)",
+                        (
+                            event["notification_id"],
+                            alert["id"],
+                            event["event_at"],
+                            json.dumps(alert, allow_nan=False),
+                        ),
+                    )
 
     def backup(self, destination: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)

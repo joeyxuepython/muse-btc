@@ -319,15 +319,7 @@ class Collector:
                     # Web lifecycle updates independently from legacy signal-row cooldown.
                     existing = self.store.signal(signal.id)
                     if not existing:
-                        active = next(
-                            (
-                                a
-                                for a in self.store.alerts()
-                                if a["asset_id"] == signal.asset_id
-                                and a["rule_id"] == signal.rule_id
-                            ),
-                            None,
-                        )
+                        active = self.store.active_alert(signal.asset_id, signal.rule_id, now)
                         if active:
                             signal.id = active["signal_id"]
                             publish_alert(self.store, signal, rank, now, self.settings)

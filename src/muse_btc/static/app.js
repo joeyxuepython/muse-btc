@@ -229,7 +229,7 @@ async function loadOverview() {
     overview = await (await api("/api/overview")).json();
     if (!first) (overview.alerts || []).filter((a) =>
       a.state === "ACTIVE" && ["STRONG", "CRITICAL_RISK"].includes(a.level) &&
-      !seenAlerts.has(a.id + ":" + (a.notification_revision || a.first_seen))).forEach((a) => {
+      !seenAlerts.has(a.id + ":" + (a.notification_id || a.notification_revision || a.first_seen))).forEach((a) => {
         if (notificationsEnabled) new Notification(`${a.symbol} · ${a.level}`, {body: a.title, tag: a.id});
         if (soundEnabled && audioContext) {
           const oscillator = audioContext.createOscillator();
@@ -239,7 +239,7 @@ async function loadOverview() {
           oscillator.start(); oscillator.stop(audioContext.currentTime + 0.15);
         }
       });
-    (overview.alerts || []).forEach((a) => seenAlerts.add(a.id + ":" + (a.notification_revision || a.first_seen)));
+    (overview.alerts || []).forEach((a) => seenAlerts.add(a.id + ":" + (a.notification_id || a.notification_revision || a.first_seen)));
     overview.signals.forEach((s) => seenSignals.add(s.id));
     renderOverview();
     if (!liveConnection) connectLive();

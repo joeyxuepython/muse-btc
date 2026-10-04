@@ -5,12 +5,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 
-from .alerts import alert_view, change_alert
+from .alerts import alert_view, change_alert, pre_pump_delivery_status
 from .async_io import run_sync
 from .btc_data import BTCDataEngine
 from .btc_intelligence import apply_btc_context, btc_assessment
@@ -83,23 +83,56 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             else regime
         )
 
-    def alert_response(alert, now, regime=None):
-        result = alert_view(alert, now)
-        snapshot = store.snapshot(alert["snapshot_id"])
-        result["data_current"] = bool(snapshot and usable(snapshot, now, config))
-        if alert["level"] == "STRONG":
-            if regime is None:
-                btc = next(
-                    (s for s in store.latest_snapshots(now) if s.asset_id == "binance:BTCUSDT"),
-                    None,
+    def alert_responses(alerts, now, regime=None, latest=None):
+        if not alerts:
+            return []
+        snapshots = store.snapshots_by_ids([a["snapshot_id"] for a in alerts])
+        if latest is None:
+            latest = {
+                s.asset_id: s
+                for s in store.latest_snapshots(
+                    now, asset_ids=list({a["asset_id"] for a in alerts} | {"binance:BTCUSDT"})
                 )
-                regime = current_regime(btc, now)
-            result["data_current"] = result["data_current"] and regime.risk_mode == "NORMAL"
-        result["lifecycle_state"] = result["state"]
-        if result["state"] == "ACTIVE" and not result["data_current"]:
-            result["state"] = "PAUSED"
-            result["unread"] = False
-        return result
+            }
+        if regime is None and any(a["level"] == "STRONG" for a in alerts):
+            # One BTC assessment per request, independent of the number of alerts.
+            regime = current_regime(latest.get("binance:BTCUSDT"), now)
+        results = []
+        for alert in alerts:
+            result = alert_view(alert, now)
+            snapshot = snapshots.get(alert["snapshot_id"])
+            current = latest.get(alert["asset_id"])
+            result["data_current"] = bool(snapshot and usable(snapshot, now, config))
+            if alert["level"] == "STRONG":
+                result["data_current"] &= bool(
+                    current and usable(current, now, config) and regime.risk_mode == "NORMAL"
+                )
+            result["lifecycle_state"] = result["state"]
+            fresh = bool(current and quote_usable(current, now, config))
+            result["current_price"] = current.price if fresh else None
+            result["current_price_market_time"] = (
+                current.market_time.isoformat() if current else None
+            )
+            result["current_quote_fresh"] = fresh
+            price = alert.get("notification_price")
+            result["price_change_since_notification_pct"] = (
+                round((current.price / price - 1) * 100, 6) if fresh and price else None
+            )
+            result["delivery_guard"] = (
+                pre_pump_delivery_status(alert, result["current_price"], now)
+                if alert["level"] == "STRONG" and alert["rule_id"] == "pre-pump-fusion"
+                else None
+            )
+            if result["state"] == "ACTIVE" and (
+                not result["data_current"] or result["delivery_guard"] not in (None, "READY")
+            ):
+                result["state"] = "PAUSED"
+                result["unread"] = False
+            results.append(result)
+        return results
+
+    def alert_response(alert, now, regime=None):
+        return alert_responses([alert], now, regime)[0]
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -257,7 +290,9 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             "coverage": providers.coverage,
             "universe": store.universe(now),
             "rankings": ranking_views(now),
-            "alerts": [alert_response(a, now, regime) for a in store.alerts()],
+            "alerts": alert_responses(
+                store.alerts(limit=200), now, regime, {s.asset_id: s for s in snapshots}
+            ),
             "request_metrics": providers.metrics,
             "as_of": now.isoformat(),
             "regime": regime,
@@ -298,20 +333,82 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
         return ranking_views(utc_now())
 
     @app.get("/api/alerts")
-    def alerts(level: str | None = None, unread: bool = False, pinned: bool = False):
+    def alerts(
+        level: Literal["INFO", "WATCH", "SETUP", "STRONG", "CRITICAL_RISK"] | None = None,
+        unread: bool = False,
+        pinned: bool = False,
+        limit: int = Query(default=200, ge=1, le=1000),
+        offset: int = Query(default=0, ge=0),
+        since: AwareDatetime | None = None,
+    ):
         now = utc_now()
-        items = [alert_response(a, now) for a in store.alerts()]
-        return [
-            a
-            for a in items
-            if (not level or a["level"] == level)
-            and (not unread or a["unread"])
-            and (not pinned or a["pinned"])
-        ]
+        items = store.alerts(
+            level=level,
+            limit=limit,
+            offset=offset,
+            since=since,
+            unread=unread,
+            pinned=pinned,
+            now=now,
+        )
+        return [a for a in alert_responses(items, now) if not unread or a["unread"]]
+
+    @app.get("/api/alerts/notifications")
+    def alert_notifications(
+        after: int = Query(default=0, ge=0),
+        limit: int = Query(default=50, ge=1, le=500),
+        through: int | None = Query(default=None, ge=0),
+        generation: str | None = None,
+    ):
+        now = utc_now()
+        try:
+            page = store.notification_page(after, limit, through, generation)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+        latest_alerts = store.alerts_by_ids([a["id"] for a in page["items"]])
+        current = {a["id"]: a for a in alert_responses(list(latest_alerts.values()), now)}
+        for item in page["items"]:
+            live = current.get(item["id"])
+            item["current_alert_state"] = live["state"] if live else "MISSING"
+            item["current_level"] = live["level"] if live else None
+            item["current_price"] = live["current_price"] if live else None
+            item["current_price_market_time"] = live["current_price_market_time"] if live else None
+            item["data_current"] = bool(live and live["data_current"])
+            price = item.get("notification_price")
+            gain = (
+                round((item["current_price"] / price - 1) * 100, 6)
+                if item["current_price"] and price
+                else None
+            )
+            item["price_change_since_notification_pct"] = gain
+            item["notification_age_seconds"] = max(
+                0, (now - datetime.fromisoformat(item["notification_at"])).total_seconds()
+            )
+            deadline = item.get("notification_expires_at", item["expires_at"])
+            status = "READY"
+            if not live:
+                status = "SKIP_MISSING"
+            elif live["lifecycle_state"] != "ACTIVE":
+                status = "SKIP_" + live["lifecycle_state"]
+            elif live.get("notification_id") and live["notification_id"] != item["notification_id"]:
+                status = "SKIP_SUPERSEDED"
+            elif live["level"] != item["level"]:
+                status = "SKIP_LEVEL_CHANGED"
+            elif datetime.fromisoformat(deadline) <= now:
+                status = "SKIP_EXPIRED"
+            elif item.get("price_provenance") == "LEGACY_UNKNOWN":
+                status = "LEGACY_REVIEW_REQUIRED"
+            elif item["level"] == "STRONG" and not item["data_current"]:
+                status = "SKIP_STALE_DATA"
+            elif item["level"] == "STRONG" and item["rule_id"] == "pre-pump-fusion":
+                status = pre_pump_delivery_status(item, item["current_price"], now)
+            item["delivery_status"] = status
+        page["as_of"] = now.isoformat()
+        return page
 
     @app.get("/api/alerts/{alert_id}")
     def alert_detail(alert_id: str):
-        alert = next((a for a in store.alerts() if a["id"] == alert_id), None)
+        alert = store.alert(alert_id)
         if not alert:
             raise HTTPException(404, "预警不存在")
         snapshot = store.snapshot(alert["snapshot_id"])

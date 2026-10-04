@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     time_alignment_seconds: int = Field(default=120, ge=1, le=300)
     statistics_stale_seconds: int = Field(default=600, ge=300, le=1800)
     alert_score_delta: float = Field(default=10, ge=1, le=100)
+    pre_pump_confirmation_seconds: int = Field(default=300, ge=60, le=900)
+    pre_pump_max_chase_pct: float = Field(default=3, gt=0, le=20)
     max_memes: int = Field(default=8, ge=1, le=30)
     meme_chains: list[str] = ["ethereum", "base", "bsc", "solana"]
     meme_watchlist: list[WatchedToken] = []
