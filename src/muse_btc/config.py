@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     enable_goplus: bool = False
     stale_seconds: int = Field(default=300, ge=60, le=3600)
     alert_cooldown_seconds: int = Field(default=3600, ge=60)
+    request_concurrency: int = Field(default=4, ge=1, le=32)
     request_timeout_seconds: float = Field(default=12, ge=1, le=60)
     api_token: SecretStr | None = None
     binance_spot_url: str = "https://data-api.binance.vision"

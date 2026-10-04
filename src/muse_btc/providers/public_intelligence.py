@@ -10,6 +10,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
+from ..async_io import run_sync
 from ..models import utc_now
 from .common import ProviderError
 
@@ -134,7 +135,9 @@ class PublicIntelligence:
                             raise ProviderError("来源正文超过大小限制")
                     at = utc_now()
                     text = bytes(body).decode(response.encoding or "utf-8", errors="replace")
-                    raw = self.store.save_raw(source, str(response.url), {"text": text}, at)
+                    raw = await run_sync(
+                        self.store.save_raw, source, str(response.url), {"text": text}, at
+                    )
                     return text, raw, at
             except httpx.HTTPError as exc:
                 raise ProviderError(f"来源连接失败：{type(exc).__name__}") from exc

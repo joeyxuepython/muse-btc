@@ -8,6 +8,7 @@ from difflib import SequenceMatcher
 
 import httpx
 
+from .async_io import run_sync
 from .context import import_context
 from .intelligence import ContextInput, IntelligenceStore
 from .models import utc_now
@@ -47,13 +48,13 @@ class SocialEngine:
     async def collect(self):
         if not self.settings.enable_social or not self.settings.x_bearer_token:
             return {"status": "NEEDS_CREDENTIALS", "posts": 0}
-        token = self.archive.acquire("social", utc_now(), 300)
+        token = await run_sync(self.archive.acquire, "social", utc_now(), 300)
         if not token:
             return {"status": "BUSY"}
         count = 0
         try:
             now = utc_now()
-            checkpoint = self.store.state("social_checkpoint") or {}
+            checkpoint = await run_sync(self.store.state, "social_checkpoint") or {}
             if checkpoint.get("query") != self.settings.x_query:
                 checkpoint = {}
             window = checkpoint.get("pending") or {
@@ -65,7 +66,8 @@ class SocialEngine:
                 window["end_time"]
             ):
                 return {"status": "COMPLETE", "posts": 0, "scope": "NO_NEW_WINDOW"}
-            self.store.set_state(
+            await run_sync(
+                self.store.set_state,
                 "social_checkpoint",
                 {**checkpoint, "query": self.settings.x_query, "pending": window},
             )
@@ -99,8 +101,12 @@ class SocialEngine:
                         "reason": "Incomplete X response",
                     }
                 at = utc_now()
-                raw = self.store.save_raw(
-                    "X", "https://api.x.com/2/tweets/search/recent", payload, at
+                raw = await run_sync(
+                    self.store.save_raw,
+                    "X",
+                    "https://api.x.com/2/tweets/search/recent",
+                    payload,
+                    at,
                 )
                 users = {u["id"]: u for u in payload.get("includes", {}).get("users", [])}
                 for post in payload.get("data", []):
@@ -122,11 +128,12 @@ class SocialEngine:
                             "followers": user.get("public_metrics", {}).get("followers_count"),
                         },
                     )
-                    import_context(self.store, item, at)
+                    await run_sync(import_context, self.store, item, at)
                     count += 1
                 next_token = payload.get("meta", {}).get("next_token")
                 if not next_token:
-                    self.store.set_state(
+                    await run_sync(
+                        self.store.set_state,
                         "social_checkpoint",
                         {
                             "query": self.settings.x_query,
@@ -143,7 +150,8 @@ class SocialEngine:
                         "end_time": window["end_time"],
                     }
                 window["next_token"] = next_token
-                self.store.set_state(
+                await run_sync(
+                    self.store.set_state,
                     "social_checkpoint",
                     {
                         **checkpoint,
@@ -161,7 +169,7 @@ class SocialEngine:
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
             return {"status": "UNAVAILABLE", "posts": count}
         finally:
-            self.archive.release("social", token)
+            await run_sync(self.archive.release, "social", token)
 
     def summary(self, now):
         posts = self.archive.records("social", now, limit=100000)

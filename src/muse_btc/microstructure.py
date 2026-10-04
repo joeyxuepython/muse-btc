@@ -16,59 +16,60 @@ def archive_snapshot_trades(store, snapshot, registry):
     multiplier = number(metadata.get("ctVal"))
     mult = number(metadata.get("ctMult")) or 1
     base = (snapshot.canonical_asset_id or "").removeprefix("asset:")
-    with store.connect() as db:
-        for raw_id in snapshot.raw_ids:
-            raw = store.raw(raw_id)
-            if not raw or datetime.fromisoformat(raw["received_at"]) > snapshot.available_at:
-                continue
-            payload = raw["payload"]
-            venue = ""
-            if "/api/v3/aggTrades" in raw["endpoint"] and isinstance(payload, list):
-                venue = "Binance Spot"
-                rows = [
-                    (
-                        str(r["a"]),
-                        milliseconds(r["T"]),
-                        float(r["p"]) * float(r["q"]) * (-1 if r["m"] else 1),
-                    )
-                    for r in payload
-                ]
-            elif (
-                "/api/v5/market/trades?" in raw["endpoint"]
-                and multiplier
-                and metadata.get("ctValCcy") == base
-                and isinstance(payload, dict)
-            ):
-                venue = "OKX Perp"
-                rows = [
-                    (
-                        str(r["tradeId"]),
-                        milliseconds(r["ts"]),
-                        float(r["sz"])
-                        * float(r["px"])
-                        * multiplier
-                        * mult
-                        * (1 if r["side"] == "buy" else -1),
-                    )
-                    for r in payload.get("data", [])
-                ]
-            else:
-                continue
-            for trade_id, market_time, notional in rows:
-                if market_time > snapshot.available_at or not math.isfinite(notional):
-                    continue
-                db.execute(
-                    "INSERT OR IGNORE INTO trade_observations VALUES (?,?,?,?,?,?,?)",
-                    (
-                        venue,
-                        snapshot.asset_id,
-                        trade_id,
-                        stamp(market_time),
-                        raw["received_at"],
-                        notional,
-                        raw_id,
-                    ),
+    pending = []
+    for raw_id in snapshot.raw_ids:
+        raw = store.raw(raw_id, endpoint_paths=("/api/v3/aggTrades", "/api/v5/market/trades"))
+        if not raw or datetime.fromisoformat(raw["received_at"]) > snapshot.available_at:
+            continue
+        payload = raw["payload"]
+        venue = ""
+        if "/api/v3/aggTrades" in raw["endpoint"] and isinstance(payload, list):
+            venue = "Binance Spot"
+            rows = [
+                (
+                    str(r["a"]),
+                    milliseconds(r["T"]),
+                    float(r["p"]) * float(r["q"]) * (-1 if r["m"] else 1),
                 )
+                for r in payload
+            ]
+        elif (
+            "/api/v5/market/trades?" in raw["endpoint"]
+            and multiplier
+            and metadata.get("ctValCcy") == base
+            and isinstance(payload, dict)
+        ):
+            venue = "OKX Perp"
+            rows = [
+                (
+                    str(r["tradeId"]),
+                    milliseconds(r["ts"]),
+                    float(r["sz"])
+                    * float(r["px"])
+                    * multiplier
+                    * mult
+                    * (1 if r["side"] == "buy" else -1),
+                )
+                for r in payload.get("data", [])
+            ]
+        else:
+            continue
+        for trade_id, market_time, notional in rows:
+            if market_time > snapshot.available_at or not math.isfinite(notional):
+                continue
+            pending.append(
+                (
+                    venue,
+                    snapshot.asset_id,
+                    trade_id,
+                    stamp(market_time),
+                    raw["received_at"],
+                    notional,
+                    raw_id,
+                ),
+            )
+    with store.connect() as db:
+        db.executemany("INSERT OR IGNORE INTO trade_observations VALUES (?,?,?,?,?,?,?)", pending)
 
 
 def cvd_summary(store, asset_id, as_of, window_seconds=3600):

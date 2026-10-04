@@ -12,6 +12,7 @@ from xml.etree import ElementTree as ET
 
 from pydantic import ConfigDict, Field, field_validator
 
+from .async_io import run_sync
 from .intelligence import EvidenceRecord, IntelligenceStore, canonical_url, digest
 from .models import Record, utc_now
 from .providers.common import ProviderError
@@ -218,7 +219,7 @@ class ResearchEngine:
 
     async def check(self, selected: list[str] | None = None):
         started = utc_now()
-        token = self.archive.acquire("research", started, 1800)
+        token = await run_sync(self.archive.acquire, "research", started, 1800)
         if not token:
             return {"status": "BUSY"}
         results = []
@@ -226,7 +227,7 @@ class ResearchEngine:
             for source, url in self.settings.research_feeds.items():
                 if selected and source not in selected:
                     continue
-                checkpoint = self.archive.checkpoint(source)
+                checkpoint = await run_sync(self.archive.checkpoint, source)
                 try:
                     if source not in RESEARCH_DOMAINS:
                         raise ProviderError("研究来源未在允许列表中")
@@ -242,7 +243,7 @@ class ResearchEngine:
                     text, raw, received = await self.public.fetch(
                         source, url, RESEARCH_DOMAINS[source], params
                     )
-                    items = feed_entries(text, source, url)
+                    items = await run_sync(feed_entries, text, source, url)
                     if len(items) > self.settings.research_max_documents:
                         raise ProviderError("研究索引超出本次上限，请提高上限后重试")
                     documents = []
@@ -251,7 +252,7 @@ class ResearchEngine:
                             body, body_raw, body_at = await self.public.fetch(
                                 source, item["url"], RESEARCH_DOMAINS[source]
                             )
-                            page = Page(body)
+                            page = await run_sync(Page, body)
                             item["body"] = page.text
                             item["published"] = (
                                 parse_date(page.meta.get("article:published_time"))
@@ -268,7 +269,9 @@ class ResearchEngine:
                         if item.get("updated") and item["updated"] > received:
                             raise ProviderError("研究来源含未来修订时间")
                         documents.append(
-                            self.save_document(source, item, raw_ids, received, checkpoint)
+                            await run_sync(
+                                self.save_document, source, item, raw_ids, received, checkpoint
+                            )
                         )
                     # A capped arXiv page cannot certify a complete interval.
                     if (
@@ -279,8 +282,12 @@ class ResearchEngine:
                         oldest = min((i["updated"] for i in items if i["updated"]), default=None)
                         if not oldest or oldest > checkpoint:
                             raise ProviderError("arXiv 增量窗口超过一页，未推进基线")
-                    self.archive.checked(
-                        source, started, True, f"已归档 {len(documents)} 篇，待中文审阅"
+                    await run_sync(
+                        self.archive.checked,
+                        source,
+                        started,
+                        True,
+                        f"已归档 {len(documents)} 篇，待中文审阅",
                     )
                     results.append(
                         {
@@ -291,12 +298,12 @@ class ResearchEngine:
                         }
                     )
                 except (ProviderError, ValueError, KeyError, TypeError) as exc:
-                    self.archive.checked(source, started, False, str(exc)[:200])
+                    await run_sync(self.archive.checked, source, started, False, str(exc)[:200])
                     results.append(
                         {"source": source, "status": "FAILED", "message": str(exc)[:200]}
                     )
         finally:
-            self.archive.release("research", token)
+            await run_sync(self.archive.release, "research", token)
         return {
             "status": "COMPLETE"
             if results and all(r["status"] == "CHECKED" for r in results)

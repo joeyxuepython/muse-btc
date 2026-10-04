@@ -4,6 +4,7 @@ import asyncio
 import statistics
 from datetime import UTC, datetime, timedelta
 
+from .async_io import run_sync
 from .intelligence import EvidenceRecord, IntelligenceStore
 from .models import ProviderState, utc_now
 from .providers.common import ProviderError, number
@@ -66,7 +67,7 @@ class MacroEngine:
 
     async def collect(self):
         now = utc_now()
-        token = self.archive.acquire("macro", now, 600)
+        token = await run_sync(self.archive.acquire, "macro", now, 600)
         if not token:
             return {"status": "BUSY"}
         results = []
@@ -89,7 +90,8 @@ class MacroEngine:
                     "revision_policy": "LATEST_RELEASE_RECEIVED_NOW_NOT_HISTORICAL_VINTAGE",
                     "source_url": self.settings.fred_url + "/series/" + series,
                 }
-                self.archive.save(
+                await run_sync(
+                    self.archive.save,
                     EvidenceRecord(
                         kind="macro",
                         key=series,
@@ -98,7 +100,7 @@ class MacroEngine:
                         available_at=at,
                         raw_ids=[raw],
                         data=data,
-                    )
+                    ),
                 )
                 results.append({"series": series, "status": "ARCHIVED"})
             try:
@@ -116,7 +118,8 @@ class MacroEngine:
                             "source_url": "https://defillama.com/stablecoins",
                         }
                     )
-                    self.archive.save(
+                    await run_sync(
+                        self.archive.save,
                         EvidenceRecord(
                             kind="stablecoin",
                             key=str(row["id"]),
@@ -125,7 +128,7 @@ class MacroEngine:
                             available_at=at,
                             raw_ids=[raw],
                             data=data,
-                        )
+                        ),
                     )
                 results.append({"series": "Stablecoins", "status": "ARCHIVED"})
             except (ProviderError, ValueError, KeyError, TypeError):
@@ -134,11 +137,12 @@ class MacroEngine:
                 text, raw, at = await self.public.fetch(
                     "Farside", self.settings.etf_url, {"farside.co.uk"}
                 )
-                flows = etf_rows(text)
+                flows = await run_sync(etf_rows, text)
                 for t, v in flows[-90:]:
                     if t > at:
                         continue
-                    self.archive.save(
+                    await run_sync(
+                        self.archive.save,
                         EvidenceRecord(
                             kind="etf",
                             key="BTC:" + t.date().isoformat(),
@@ -153,13 +157,14 @@ class MacroEngine:
                                 "holdings": None,
                                 "aum": None,
                             },
-                        )
+                        ),
                     )
                 results.append({"series": "ETF", "status": "ARCHIVED"})
             except (ProviderError, ValueError, KeyError, TypeError):
                 results.append({"series": "ETF", "status": "UNAVAILABLE"})
             ready = sum(r["status"] == "ARCHIVED" for r in results)
-            self.public.providers.status(
+            await run_sync(
+                self.public.providers.status,
                 "Macro",
                 ProviderState.READY
                 if ready == len(results)
@@ -169,9 +174,9 @@ class MacroEngine:
                 f"公开序列 {ready}/{len(results)}；部分事件共识需导入",
                 "FRED/稳定币/ETF",
             )
-            self.store.set_state("macro_last_check", now.isoformat())
+            await run_sync(self.store.set_state, "macro_last_check", now.isoformat())
         finally:
-            self.archive.release("macro", token)
+            await run_sync(self.archive.release, "macro", token)
         return {"status": "COMPLETE" if ready == len(results) else "DEGRADED", "sources": results}
 
     def summary(self, now):

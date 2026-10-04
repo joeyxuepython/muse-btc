@@ -5,6 +5,7 @@ import re
 import statistics
 from collections import Counter
 
+from .async_io import run_sync
 from .intelligence import EvidenceRecord, IntelligenceStore
 from .models import Features, Module, ProviderState, Snapshot, TokenRisk
 from .providers.common import ProviderError, milliseconds, number
@@ -120,7 +121,7 @@ class MemeEngine:
             )
             if not isinstance(profiles, list):
                 raise ProviderError("DEX profiles 响应结构不符")
-            queued = self.store.state("meme_discovery_queue") or []
+            queued = await run_sync(self.store.state, "meme_discovery_queue") or []
             known = {r["key"] for r in queued}
             for p in profiles + [
                 {"chainId": t.chain, "tokenAddress": t.address}
@@ -136,8 +137,8 @@ class MemeEngine:
                 if key not in known:
                     queued.append({"key": key, "raw_id": raw, "first_seen": at.isoformat()})
                     known.add(key)
-            self.store.set_state("meme_discovery_queue", queued)
-            cursor = int(self.store.state("meme_discovery_cursor") or 0)
+            await run_sync(self.store.set_state, "meme_discovery_queue", queued)
+            cursor = int(await run_sync(self.store.state, "meme_discovery_cursor") or 0)
             batch = (
                 [
                     queued[(cursor + i) % len(queued)]
@@ -147,11 +148,14 @@ class MemeEngine:
                 else []
             )
             results = await asyncio.gather(*(self.asset(r) for r in batch), return_exceptions=True)
-            self.store.set_state(
-                "meme_discovery_cursor", (cursor + len(batch)) % max(1, len(queued))
+            await run_sync(
+                self.store.set_state,
+                "meme_discovery_cursor",
+                (cursor + len(batch)) % max(1, len(queued)),
             )
             snapshots = [s for s in results if isinstance(s, Snapshot)]
-            self.providers.status(
+            await run_sync(
+                self.providers.status,
                 "DEX Screener",
                 ProviderState.DEGRADED,
                 f"独立发现池 {len(queued)}；本轮有效 {len(snapshots)}/{len(batch)}；非全链覆盖",
@@ -159,8 +163,12 @@ class MemeEngine:
             )
             return snapshots
         except (ProviderError, ValueError, TypeError, KeyError):
-            self.providers.status(
-                "DEX Screener", ProviderState.UNAVAILABLE, "发现接口受限或响应无效", "Meme 独立发现"
+            await run_sync(
+                self.providers.status,
+                "DEX Screener",
+                ProviderState.UNAVAILABLE,
+                "发现接口受限或响应无效",
+                "Meme 独立发现",
             )
             return []
 
@@ -223,7 +231,7 @@ class MemeEngine:
             pool_age_hours=age,
             return_5m_pct=number((pair.get("priceChange") or {}).get("m5")),
         )
-        old = self.archive.records("meme", at, key=queued["key"])
+        old = await run_sync(self.archive.records, "meme", at, key=queued["key"])
         initial = old[-1].data["first_price"] if old else float(pair["priceUsd"])
         score_components = {
             "liquidity": min((f.liquidity_usd or 0) / 100000, 1) * 30,
@@ -260,7 +268,8 @@ class MemeEngine:
             "source_url": pair.get("url"),
             "risk": risk.model_dump(mode="json"),
         }
-        self.archive.save(
+        await run_sync(
+            self.archive.save,
             EvidenceRecord(
                 kind="meme",
                 key=queued["key"],
@@ -269,7 +278,7 @@ class MemeEngine:
                 available_at=at,
                 raw_ids=raw_ids,
                 data=data,
-            )
+            ),
         )
         return Snapshot(
             asset_id="dex:" + queued["key"],

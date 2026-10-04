@@ -143,10 +143,13 @@ class IntelligenceStore:
         limit = max(1, min(limit, 100000))
         if latest:
             query = (
-                "SELECT payload FROM (SELECT payload,available_at,rowid AS sequence, "
+                "SELECT evidence.payload FROM (SELECT available_at,rowid AS sequence, "
                 "ROW_NUMBER() OVER (PARTITION BY key ORDER BY available_at DESC,rowid DESC) AS n "
-                "FROM intelligence_records WHERE " + where + ") WHERE n=1 "
-                "ORDER BY available_at DESC,sequence DESC LIMIT ?"
+                "FROM intelligence_records WHERE "
+                + where
+                + ") latest JOIN intelligence_records evidence "
+                "ON evidence.rowid=latest.sequence WHERE latest.n=1 "
+                "ORDER BY latest.available_at DESC,latest.sequence DESC LIMIT ?"
             )
         else:
             query = (

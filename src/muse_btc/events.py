@@ -8,6 +8,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from .async_io import run_sync
 from .intelligence import EvidenceRecord, IntelligenceStore
 from .models import utc_now
 from .providers.common import ProviderError
@@ -123,7 +124,7 @@ class EventEngine:
 
     async def collect(self):
         results = []
-        token = self.archive.acquire("macro-events", utc_now(), 300)
+        token = await run_sync(self.archive.acquire, "macro-events", utc_now(), 300)
         if not token:
             return {"status": "BUSY"}
         try:
@@ -131,9 +132,10 @@ class EventEngine:
                 try:
                     html, raw, at = await self.public.fetch("BLS", url, {"www.bls.gov"})
                     if kind == "calendar":
-                        items = calendar_entries(html)
+                        items = await run_sync(calendar_entries, html)
                         for item in items:
-                            self.archive.save(
+                            await run_sync(
+                                self.archive.save,
                                 EvidenceRecord(
                                     kind="macro_calendar",
                                     key=item["uid"],
@@ -142,12 +144,13 @@ class EventEngine:
                                     available_at=at,
                                     raw_ids=[raw],
                                     data=item,
-                                )
+                                ),
                             )
                     else:
-                        release, items = release_values(html, kind, at)
+                        release, items = await run_sync(release_values, html, kind, at)
                         for name, value, units, excerpt in items:
-                            self.archive.save(
+                            await run_sync(
+                                self.archive.save,
                                 EvidenceRecord(
                                     kind="macro_event",
                                     key=f"BLS:{name}:{release.isoformat()}",
@@ -168,13 +171,15 @@ class EventEngine:
                                         "evidence_excerpt": excerpt,
                                         "consensus_status": "UNAVAILABLE",
                                     },
-                                )
+                                ),
                             )
                     results.append({"source": kind, "status": "ARCHIVED", "items": len(items)})
                 except (ProviderError, ValueError, KeyError) as exc:
                     results.append({"source": kind, "status": "UNAVAILABLE", "reason": str(exc)})
-            self.store.set_state(
-                "event_checks", {"checked_at": utc_now().isoformat(), "sources": results}
+            await run_sync(
+                self.store.set_state,
+                "event_checks",
+                {"checked_at": utc_now().isoformat(), "sources": results},
             )
             return {
                 "status": "COMPLETE"
@@ -183,7 +188,7 @@ class EventEngine:
                 "sources": results,
             }
         finally:
-            self.archive.release("macro-events", token)
+            await run_sync(self.archive.release, "macro-events", token)
 
     def calendar(self, now):
         rows = self.archive.records("macro_calendar", now)

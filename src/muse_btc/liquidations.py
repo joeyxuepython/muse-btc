@@ -6,6 +6,7 @@ import json
 from websockets.asyncio.client import connect
 from websockets.exceptions import WebSocketException
 
+from .async_io import run_sync
 from .intelligence import EvidenceRecord, IntelligenceStore, digest
 from .models import utc_now
 from .providers.common import ProviderError, milliseconds, number
@@ -83,7 +84,9 @@ async def collect_liquidations(store, settings, seconds=10, connect_factory=conn
                     if parsed is None:
                         continue
                     trade_time, data = parsed
-                    raw = store.save_raw("Binance Liquidations", LIQUIDATION_URL, payload, received)
+                    raw = await run_sync(
+                        store.save_raw, "Binance Liquidations", LIQUIDATION_URL, payload, received
+                    )
                     record = EvidenceRecord(
                         kind="liquidation",
                         key="Binance:" + digest(payload),
@@ -93,7 +96,7 @@ async def collect_liquidations(store, settings, seconds=10, connect_factory=conn
                         raw_ids=[raw],
                         data=data,
                     )
-                    saved = archive.save(record)
+                    saved = await run_sync(archive.save, record)
                     observed += int(saved.id == record.id)
                 except (ValueError, ProviderError, TypeError):
                     rejected += 1
@@ -136,7 +139,8 @@ async def collect_liquidations(store, settings, seconds=10, connect_factory=conn
                 "累计成交快照不可相加为完整清算量",
             ],
         }
-        archive.save(
+        await run_sync(
+            archive.save,
             EvidenceRecord(
                 kind="liquidation_window",
                 key="Binance:" + started.isoformat(),
@@ -144,6 +148,6 @@ async def collect_liquidations(store, settings, seconds=10, connect_factory=conn
                 market_time=started,
                 available_at=at,
                 data=result,
-            )
+            ),
         )
     return result

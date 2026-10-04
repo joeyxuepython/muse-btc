@@ -6,6 +6,7 @@ from pathlib import Path
 
 import uvicorn
 
+from .async_io import run_sync
 from .btc_data import BTCDataEngine
 from .config import Settings
 from .context import import_context
@@ -33,7 +34,7 @@ def parse_time(value: str) -> datetime:
 async def collect_once(settings: Settings, store: Store) -> dict:
     providers = Providers(settings, store)
     collector = Collector(settings, store, providers)
-    collector.initialise_statuses()
+    await run_sync(collector.initialise_statuses)
     try:
         return await collector.collect_once()
     finally:
@@ -55,7 +56,7 @@ async def intelligence_once(settings, store, scope, sources=None):
             return await SocialEngine(store, settings, providers).collect()
         snapshots = await providers.memes()
         for snapshot in snapshots:
-            store.save_snapshot(snapshot)
+            await run_sync(store.save_snapshot, snapshot)
         return {"snapshots": len(snapshots), "enabled": settings.enable_meme_discovery}
     finally:
         await providers.close()

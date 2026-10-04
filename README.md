@@ -2,6 +2,8 @@
 
 按[最新 V4 计划](docs/requirements/v4-latest-plan.md)开发：**BTC、ETH 独立监控，加 100 个动态 USDT 山寨币，共 102 个现货标的**。币安提供现货，OKX 提供合约。Phase 1 已实现，V0.2 增加 Phase 2–6 可运行框架；真实来源、凭据、历史样本和后续适配需云端验收。Telegram 已取消。
 
+云端无响应问题的修复与更新步骤见[采集响应性说明](docs/collector-freeze-fix.md)，包括保护 Muse 临时修改、重新安装、健康探针和验收。
+
 最新升级：[云端可靠性、事件与 BTC 综合研判](docs/reliability-upgrade.md)。邮件沿用 Muse 已接好的连接，提供待审阅队列；后台扩展采集默认关闭，待云端显式启用。
 
 新入口：网页“研究与扩展”。[云端运行步骤](docs/cloud-run.md) · [框架和未验收能力](docs/phase2-6-framework.md)。研究检查手动触发、首次只建基线，无新增定时任务。Meme / X 默认关闭，模型不自动晋级。
