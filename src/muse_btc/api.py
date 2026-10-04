@@ -10,12 +10,13 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import AwareDatetime, BaseModel, Field
 
-from .alerts import alert_view, change_alert, pre_pump_delivery_status
+from .alerts import alert_view, change_alert, pre_pump_delivery_status, public_scores
 from .async_io import run_sync
 from .btc_data import BTCDataEngine
 from .btc_intelligence import apply_btc_context, btc_assessment
 from .config import Settings
 from .context import import_context
+from .delivery import build_deliveries
 from .events import EventEngine
 from .experiments import paid_evaluation, ranking_report, train_model
 from .intelligence import ContextInput, IntelligenceStore
@@ -28,6 +29,7 @@ from .rules import market_regime, quote_usable, usable
 from .service import Collector, signal_view
 from .social import SocialEngine
 from .storage import Store
+from .strategy_audit import report as strategy_report
 from .validation import validation_report
 from .worker import IntelligenceWorker, runtime_health
 
@@ -51,6 +53,13 @@ class TrainRequest(BaseModel):
 class FreeDataRequest(BaseModel):
     scope: Literal["all", "onchain", "options", "macro", "liquidations"] = "all"
     liquidation_seconds: int = Field(default=10, ge=1, le=60)
+
+
+class NotificationReceipt(BaseModel):
+    notification_ids: list[str] = Field(min_length=1, max_length=500)
+    status: Literal["SENT", "FAILED", "SKIPPED"]
+    message_id: str | None = Field(default=None, max_length=300)
+    reason: str | None = Field(default=None, max_length=1000)
 
 
 def create_app(settings: Settings | None = None, providers_factory=Providers) -> FastAPI:
@@ -366,8 +375,11 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
         latest_alerts = store.alerts_by_ids([a["id"] for a in page["items"]])
+        page["items"] = [public_scores(a) for a in page["items"]]
+        receipts = store.notification_receipts([a["notification_id"] for a in page["items"]])
         current = {a["id"]: a for a in alert_responses(list(latest_alerts.values()), now)}
         for item in page["items"]:
+            item["receipt"] = receipts.get(item["notification_id"], {})
             live = current.get(item["id"])
             item["current_alert_state"] = live["state"] if live else "MISSING"
             item["current_level"] = live["level"] if live else None
@@ -404,7 +416,27 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
                 status = pre_pump_delivery_status(item, item["current_price"], now)
             item["delivery_status"] = status
         page["as_of"] = now.isoformat()
+        page["delivery_groups_preview"] = build_deliveries(page["items"])
+        page["grouping_scope"] = "PAGE_PREVIEW_ONLY_DRAIN_BATCH_BEFORE_GROUPING"
         return page
+
+    @app.post("/api/alerts/notifications/receipts")
+    def notification_receipts(receipt: NotificationReceipt):
+        try:
+            store.save_notification_receipt(
+                receipt.notification_ids,
+                receipt.status,
+                receipt.message_id,
+                receipt.reason,
+                utc_now(),
+            )
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        return store.notification_receipts(receipt.notification_ids)
+
+    @app.get("/api/strategies")
+    def strategies(asset_id: str | None = None, limit: int = Query(default=100, ge=1, le=5000)):
+        return strategy_report(store, config, utc_now(), asset_id=asset_id, limit=limit)
 
     @app.get("/api/alerts/{alert_id}")
     def alert_detail(alert_id: str):
@@ -497,6 +529,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             "scheduled_research": config.enable_background_intelligence
             and "research" in config.background_scopes,
             "btc_assessment": btc_assessment(store, config, now),
+            "strategies": strategy_report(store, config, now, limit=1500),
             "events": EventEngine(store, config, public).calendar(now),
             "event_reactions": macro.event_reactions(now),
             "event_checks": store.state("event_checks"),

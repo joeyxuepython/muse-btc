@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 
 from .config import Settings
 from .models import Module, Regime, Signal, SignalKind, Snapshot
+from .strategy_audit import BASIC_INPUTS, record
 
 RULE_VERSION = "rules-v4-2"
 
@@ -145,13 +146,26 @@ def _signal(
         else ["风险条件解除"],
         expires_at=now + timedelta(seconds=horizon * 4),
         horizon_seconds=horizon,
+        context=regime.research_context,
     )
 
 
-def evaluate(snapshot: Snapshot, regime: Regime, now: datetime, settings: Settings) -> list[Signal]:
-    if not usable(snapshot, now, settings):
-        return []
-    if snapshot.module == Module.MEME:
+def evaluate(
+    snapshot: Snapshot, regime: Regime, now: datetime, settings: Settings, trace=None
+) -> list[Signal]:
+    if not usable(snapshot, now, settings) or snapshot.module == Module.MEME:
+        for rule in BASIC_INPUTS:
+            record(
+                trace,
+                snapshot,
+                rule,
+                status="NOT_APPLICABLE" if snapshot.module == Module.MEME else "MISSING_DATA",
+                reasons=[
+                    "非交易所行情模块"
+                    if snapshot.module == Module.MEME
+                    else "行情过期或质量检查未通过"
+                ],
+            )
         return []
     f = snapshot.features.model_copy(deep=True)
     for name, field in (
@@ -290,4 +304,16 @@ def evaluate(snapshot: Snapshot, regime: Regime, now: datetime, settings: Settin
             signal.kind = SignalKind.WATCH
             signal.entry_zone = None
             signal.contradictions.append("数据覆盖不足，仅供观察")
+    if trace is not None:
+        for rule, names in BASIC_INPUTS.items():
+            inputs = {name: getattr(f, name) for name in names}
+            if rule == "spot-led-momentum" and snapshot.module in (Module.BTC, Module.ETH):
+                inputs.pop("relative_strength_15m_pct")
+            record(
+                trace,
+                snapshot,
+                rule,
+                inputs=inputs,
+                signal=next((s for s in result if s.rule_id == rule), None),
+            )
     return result

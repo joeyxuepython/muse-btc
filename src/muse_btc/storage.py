@@ -101,6 +101,17 @@ class Store:
                     notification_id TEXT NOT NULL UNIQUE, alert_id TEXT NOT NULL,
                     event_at TEXT NOT NULL, payload TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS notification_receipts (
+                    notification_id TEXT PRIMARY KEY, payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS strategy_runs (
+                    batch_id TEXT PRIMARY KEY, as_of TEXT NOT NULL, payload TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS strategy_run_time ON strategy_runs(as_of);
+                CREATE TABLE IF NOT EXISTS strategy_latest (
+                    asset_id TEXT NOT NULL, rule_id TEXT NOT NULL, payload TEXT NOT NULL,
+                    PRIMARY KEY(asset_id,rule_id)
+                );
                 CREATE TABLE IF NOT EXISTS runtime_state (
                     key TEXT PRIMARY KEY, payload TEXT NOT NULL
                 );
@@ -647,6 +658,74 @@ class Store:
                 (alert_id,),
             ).fetchall()
         return [json.loads(r[0]) for r in rows]
+
+    def save_strategy_run(self, summary, rows):
+        with self.connect() as db:
+            db.execute(
+                "INSERT INTO strategy_runs VALUES (?,?,?)",
+                (summary["batch_id"], summary["as_of"], json.dumps(summary, allow_nan=False)),
+            )
+            db.executemany(
+                "INSERT OR REPLACE INTO strategy_latest VALUES (?,?,?)",
+                [(r["asset_id"], r["rule_id"], json.dumps(r, allow_nan=False)) for r in rows],
+            )
+
+    def strategy_report(self, asset_id=None, limit=100):
+        with self.connect() as db:
+            run = db.execute(
+                "SELECT payload FROM strategy_runs ORDER BY as_of DESC,rowid DESC LIMIT 1"
+            ).fetchone()
+            query, args = "SELECT payload FROM strategy_latest", []
+            if asset_id:
+                query += " WHERE asset_id=?"
+                args.append(asset_id)
+            rows = db.execute(
+                query + " ORDER BY asset_id,rule_id LIMIT ?", args + [limit]
+            ).fetchall()
+        return json.loads(run[0]) if run else None, [json.loads(r[0]) for r in rows]
+
+    def notification_receipts(self, ids):
+        result = {}
+        with self.connect() as db:
+            for start in range(0, len(ids), 500):
+                batch = ids[start : start + 500]
+                rows = db.execute(
+                    "SELECT notification_id,payload FROM notification_receipts "
+                    "WHERE notification_id IN (" + ",".join("?" for _ in batch) + ")",
+                    batch,
+                ).fetchall()
+                result.update({r[0]: json.loads(r[1]) for r in rows})
+        return result
+
+    def save_notification_receipt(self, ids, status, message_id, reason, now):
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            # Validate the complete batch before changing any receipt.
+            for notification_id in ids:
+                if not db.execute(
+                    "SELECT 1 FROM alert_notifications WHERE notification_id=?", (notification_id,)
+                ).fetchone():
+                    raise ValueError("通知不存在: " + notification_id)
+            for notification_id in ids:
+                prior = db.execute(
+                    "SELECT payload FROM notification_receipts WHERE notification_id=?",
+                    (notification_id,),
+                ).fetchone()
+                if prior:
+                    prior_status = json.loads(prior[0])["status"]
+                    if prior_status == "SENT" or prior_status == "SKIPPED" and status != "SENT":
+                        continue
+                payload = {
+                    "status": status,
+                    "message_id": message_id,
+                    "reason": reason,
+                    "received_at": now.isoformat(),
+                    "source": "MUSE_REPORTED",
+                }
+                db.execute(
+                    "INSERT OR REPLACE INTO notification_receipts VALUES (?,?)",
+                    (notification_id, json.dumps(payload)),
+                )
 
     def save_alert(self, alert: dict, event: dict | None = None) -> None:
         with self.connect() as db:

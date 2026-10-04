@@ -71,15 +71,26 @@ def publish_alert(store, signal, ranking, now, settings):
         if confirmation["confirmation_status"] != "CONFIRMED":
             level = "SETUP"
             contradictions.append(confirmation["confirmation_reason"])
-    score = ranking["score"] if ranking else signal.evidence_score
+    tracking_score = ranking["score"] if ranking else signal.evidence_score
+    risk = signal.kind in (SignalKind.RISK, SignalKind.INVALIDATED)
+    observation = signal.model_version == "context-observation"
+    evidence_score = None if risk or observation else signal.evidence_score
+    score = None if risk else evidence_score
+    opportunity_score = ranking["score"] if ranking else None
     at = now.isoformat()
     payload = signal.model_dump(mode="json")
     event = None
     if candidate:
         changed = (
             candidate["level"] != level
-            or abs(candidate.get("notification_score", candidate["score"]) - score)
+            or abs(
+                candidate.get(
+                    "notification_tracking_score", candidate.get("notification_score") or 0
+                )
+                - tracking_score
+            )
             >= settings.alert_score_delta
+            or candidate.get("score_schema") != "separated-v1"
             or evidence_signature(candidate["evidence"]) != evidence_signature(signal.evidence)
             or evidence_signature(candidate["contradictions"]) != evidence_signature(contradictions)
             or set(candidate["evidence_groups"]) != set(signal.evidence_groups)
@@ -90,7 +101,11 @@ def publish_alert(store, signal, ranking, now, settings):
                 "event_at": at,
                 "from_level": candidate["level"],
                 "to_level": level,
-                "score_delta": round(score - candidate["score"], 2),
+                "score_delta": round(score - candidate["score"], 2)
+                if score is not None
+                and candidate.get("score") is not None
+                and candidate.get("score_schema") == "separated-v1"
+                else None,
                 "reason": "证据或级别变化",
             }
             if LEVELS[level] > LEVELS[candidate["level"]]:
@@ -144,18 +159,36 @@ def publish_alert(store, signal, ranking, now, settings):
             snapshot.available_at.isoformat() if snapshot else None
         )
         alert["price_provenance"] = "SIGNAL_REFERENCE"
+        alert["notification_tracking_score"] = tracking_score
         alert["notification_score"] = score
-    previous_score = alert.get("score")
+    previous_score = alert.get("score") if alert.get("score_schema") == "separated-v1" else None
+    if alert.get("score_schema") != "separated-v1":
+        alert["max_score"] = score
     alert.update(
         {
             "symbol": signal.symbol,
             "level": level,
             "score": score,
+            "score_schema": "separated-v1",
+            "score_kind": "RULE_EVIDENCE" if score is not None else None,
+            "opportunity_score": opportunity_score,
+            "rule_evidence_score": evidence_score,
+            "risk_level": "CRITICAL_RISK" if risk else None,
+            "risk_type": "SIGNAL_INVALIDATED"
+            if signal.kind == SignalKind.INVALIDATED
+            else "MARKET_RISK"
+            if risk
+            else None,
+            "original_signal_evidence_score": signal.evidence_score
+            if signal.kind == SignalKind.INVALIDATED
+            else None,
             "previous_score": previous_score,
-            "score_delta": round(score - previous_score, 2) if previous_score is not None else None,
+            "score_delta": round(score - previous_score, 2)
+            if previous_score is not None and score is not None
+            else None,
             "last_updated": at,
             "expires_at": signal.expires_at.isoformat(),
-            "max_score": max(alert["max_score"], score),
+            "max_score": max(alert.get("max_score") or score, score) if score is not None else None,
             "signal_id": signal.id,
             "snapshot_id": signal.snapshot_id,
             "price": signal.reference_price,
@@ -165,7 +198,7 @@ def publish_alert(store, signal, ranking, now, settings):
             "invalidation_conditions": signal.invalidation_conditions,
             "ranking": ranking,
             "validation_status": "OBSERVATION_ONLY",
-            "signal_version": "web-alert-v4-2",
+            "signal_version": "web-alert-v4-3",
             "rule_version": signal.rule_version,
             "evidence_groups": payload["evidence_groups"],
             "requested_level": requested_level,
@@ -174,6 +207,10 @@ def publish_alert(store, signal, ranking, now, settings):
             "gain_since_first_seen_pct": confirmation.get("gain_since_first_seen_pct"),
             "confirmation_reason": confirmation.get("confirmation_reason"),
             "max_chase_pct": confirmation.get("max_chase_pct"),
+            "patterns": signal.patterns,
+            "context": signal.context,
+            "horizon_seconds": signal.horizon_seconds,
+            "score_limitations": "机会分用于横向排名；规则证据分未校准；风险等级不由分数换算",
         }
     )
     store.save_alert(alert, event)
@@ -181,7 +218,7 @@ def publish_alert(store, signal, ranking, now, settings):
 
 
 def alert_view(alert, now):
-    result = dict(alert)
+    result = public_scores(alert)
     result["state"] = (
         "RESOLVED"
         if alert.get("resolved_at")
@@ -190,6 +227,21 @@ def alert_view(alert, now):
         else "ACTIVE"
     )
     result["unread"] = result["state"] == "ACTIVE" and not alert.get("read_at")
+    return result
+
+
+def public_scores(alert):
+    result = dict(alert)
+    if result.get("score_schema") != "separated-v1":
+        result.update(
+            legacy_score=result.get("score"),
+            score=None,
+            score_kind=None,
+            opportunity_score=(result.get("ranking") or {}).get("score"),
+            rule_evidence_score=None,
+            risk_level="CRITICAL_RISK" if result["level"] == "CRITICAL_RISK" else None,
+            score_schema="LEGACY_UNSEPARATED",
+        )
     return result
 
 

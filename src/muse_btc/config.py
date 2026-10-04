@@ -81,6 +81,9 @@ class Settings(BaseSettings):
     slippage_bps_each_way: float = Field(default=5, ge=0)
     # Application collection is opt-in; these switches never create a Codex scheduled task.
     enable_intelligence: bool = True
+    enable_context_observations: bool = True
+    context_mvrv_percentile: float = Field(default=90, ge=50, le=100)
+    context_options_iv_pct: float = Field(default=80, gt=0, le=300)
     enable_meme_discovery: bool = False
     enable_social: bool = False
     macro_series: list[str] = [

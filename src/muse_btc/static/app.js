@@ -148,6 +148,11 @@ function renderAssets() {
   $("#asset-footer").textContent =
     `${items.length} 个标的 · ${items.filter((a) => a.data_usable).length} 个数据可用`;
 }
+function signalScore(s) {
+  if (["RISK", "INVALIDATED"].includes(s.kind)) return "风险等级：重要风险";
+  if (s.model_version === "context-observation") return "研究观察 · 尚未校准";
+  return `规则证据 ${format(s.evidence_score, 0)}（非概率）`;
+}
 function renderSignals() {
   const items = overview.signals
     .filter((s) => !["BTC", "ETH", "ALT", "MEME"].includes(view) || s.module === view)
@@ -155,7 +160,7 @@ function renderSignals() {
   $("#signals").innerHTML = items
     .map(
       (s) =>
-        `<article class="signal-row" data-signal="${escapeHtml(s.id)}" tabindex="0"><div class="signal-top">${tag(kinds[s.kind] || s.kind, s.kind === "RISK" ? "danger" : s.kind === "WATCH" ? "warning" : "")}<strong>${escapeHtml(s.symbol)}</strong><time>${time(s.emitted_at)}</time></div><p>${escapeHtml(s.title)}</p><div class="signal-meta"><span>${escapeHtml(states[s.state] || s.state)}</span><span>证据评分 ${format(s.evidence_score, 0)}</span><span>${s.horizon_seconds / 60}m 观察窗</span><span>规则观察期</span></div></article>`,
+        `<article class="signal-row" data-signal="${escapeHtml(s.id)}" tabindex="0"><div class="signal-top">${tag(kinds[s.kind] || s.kind, ["RISK", "INVALIDATED"].includes(s.kind) ? "danger" : s.kind === "WATCH" ? "warning" : "")}<strong>${escapeHtml(s.symbol)}</strong><time>${time(s.emitted_at)}</time></div><p>${escapeHtml(s.title)}</p><div class="signal-meta"><span>${escapeHtml(states[s.state] || s.state)}</span><span>${escapeHtml(signalScore(s))}</span><span>${s.horizon_seconds / 60}m 观察窗</span><span>${escapeHtml(s.rule_id)}</span></div></article>`,
     )
     .join("");
   $("#empty-signals").hidden = items.length > 0;
@@ -227,10 +232,12 @@ async function loadOverview() {
   try {
     const first = overview === null;
     overview = await (await api("/api/overview")).json();
-    if (!first) (overview.alerts || []).filter((a) =>
-      a.state === "ACTIVE" && ["STRONG", "CRITICAL_RISK"].includes(a.level) &&
-      !seenAlerts.has(a.id + ":" + (a.notification_id || a.notification_revision || a.first_seen))).forEach((a) => {
-        if (notificationsEnabled) new Notification(`${a.symbol} · ${a.level}`, {body: a.title, tag: a.id});
+    if (!first) groupAlerts((overview.alerts || []).filter((a) =>
+      a.state === "ACTIVE" && ["STRONG", "CRITICAL_RISK"].includes(a.level)))
+      .filter((g) => g.members.some((a) => !seenAlerts.has(a.id + ":" + (a.notification_id || a.notification_revision || a.first_seen))))
+      .forEach((g) => {
+        const a = g.primary;
+        if (notificationsEnabled) new Notification(`${a.symbol} · ${a.level}`, {body: g.members.map(m => m.title).join("；"), tag: g.key});
         if (soundEnabled && audioContext) {
           const oscillator = audioContext.createOscillator();
           const gain = audioContext.createGain();
@@ -482,6 +489,27 @@ setInterval(() => {
 }, 10000);
 loadOverview();
 
+function groupAlerts(alerts) {
+  const groups = new Map(), levels = {INFO:0, WATCH:1, SETUP:2, STRONG:3, CRITICAL_RISK:4};
+  for (const a of alerts) {
+    const separate = a.level === "CRITICAL_RISK" || a.context?.validation_status === "OBSERVATION_ONLY" || !["ACTIVE", "PAUSED"].includes(a.state);
+    const key = separate ? a.id : `${a.asset_id}:${a.state}:${a.horizon_seconds || 3600}`;
+    if (!groups.has(key)) groups.set(key, {key, members:[]});
+    groups.get(key).members.push(a);
+  }
+  return [...groups.values()].map(g => {
+    g.members.sort((a,b) => (levels[b.level]-levels[a.level]) || b.last_updated.localeCompare(a.last_updated));
+    g.primary = g.members[0];
+    g.patterns = [...new Set(g.members.flatMap(a => a.patterns || []))];
+    return g;
+  });
+}
+function alertScores(a) {
+  if (a.level === "CRITICAL_RISK") return `风险等级：重要风险${a.risk_type === "SIGNAL_INVALIDATED" ? " · 原信号失效" : ""}`;
+  if (a.score_schema === "LEGACY_UNSEPARATED") return "旧版评分含义未分离，需查看原证据";
+  if (a.context?.validation_status === "OBSERVATION_ONLY") return "研究观察 · 尚未校准";
+  return `机会排行 ${format(a.opportunity_score)} · 规则证据 ${format(a.rule_evidence_score)}（非概率）`;
+}
 function renderV4() {
   if (!overview) return;
   const rows = [...(overview.rankings || [])];
@@ -498,7 +526,10 @@ function renderV4() {
   const alerts = (overview.alerts || []).filter((a) => (!level || a.level === level) &&
     (!state || (state === "unread" ? a.unread : state === "pinned" ? a.pinned : a.state === state)) &&
     `${a.symbol} ${a.title} ${a.rule_id}`.toLowerCase().includes(query));
-  $("#web-alerts").innerHTML = alerts.length ? alerts.map((a) => `<article class="signal-row" data-alert="${escapeHtml(a.id)}" tabindex="0"><div class="signal-top">${tag(a.level, a.level === "CRITICAL_RISK" ? "danger" : "warning")}<strong>${escapeHtml(a.symbol)}</strong>${a.unread ? tag("未读") : ""}${a.pinned ? tag("已固定") : ""}<time>${time(a.last_updated)}</time></div><p>${escapeHtml(a.title)}</p><div class="signal-meta"><span>评分 ${format(a.score)} · 变化 ${format(a.score_delta)}</span><span>${escapeHtml(states[a.state] || a.state)}</span><span>首次 ${time(a.first_seen)}</span></div></article>`).join("") : '<p class="empty">暂无符合条件的真实预警。</p>';
+  $("#web-alerts").innerHTML = alerts.length ? groupAlerts(alerts).map((g) => {
+    const a = g.primary;
+    return `<article class="signal-row" data-alert="${escapeHtml(a.id)}" tabindex="0"><div class="signal-top">${tag(a.level, a.level === "CRITICAL_RISK" ? "danger" : "warning")}<strong>${escapeHtml(a.symbol)}</strong>${g.members.some(m => m.unread) ? tag("未读") : ""}${g.members.some(m => m.pinned) ? tag("已固定") : ""}<time>${time(a.last_updated)}</time></div><p>${g.members.map(m => escapeHtml(m.title)).join("；")}</p><div class="signal-meta"><span>${escapeHtml(alertScores(a))}</span><span>${escapeHtml(states[a.state] || a.state)}</span><span>首次 ${time(a.first_seen)}</span></div>${g.patterns.length ? `<p>${escapeHtml(g.patterns.join("；"))}</p>` : ""}${g.members.length > 1 ? '<p>同币相关条件合并，分数不相加，不能视作多套独立策略确认。</p>' : ""}<div class="actions">${g.members.map(m => `<button class="button secondary" data-alert="${escapeHtml(m.id)}">${escapeHtml(m.rule_id)}${m.rule_evidence_score != null ? ` · 证据 ${format(m.rule_evidence_score)}` : ""}</button>`).join("")}</div></article>`;
+  }).join("") : '<p class="empty">暂无符合条件的真实预警。</p>';
 }
 async function showAlert(id) {
   try {
@@ -506,7 +537,7 @@ async function showAlert(id) {
     $("#detail-title").textContent = `${a.symbol} · ${a.level}`;
     const list = (values) => `<ul>${values.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>`;
     const action = (name,label) => `<button class="button secondary" data-alert-id="${escapeHtml(a.id)}" data-alert-action="${name}">${label}</button>`;
-    $("#detail-body").innerHTML = `<p>${escapeHtml(a.title)} · 评分 ${format(a.score)}（非上涨概率）</p><p>首次发现 ${time(a.first_seen)} · 最新 ${time(a.last_updated)} · 当时价格 ${price(a.price)}</p><h3>支持证据</h3>${list(a.evidence)}<h3>反向证据</h3>${list(a.contradictions)}<h3>失效条件</h3>${list(a.invalidation_conditions)}<h3>数据新鲜度</h3><p>报价 ${time(snapshot?.market_time)} · 详细 ${time(snapshot?.detail_updated_at)}</p><h3>状态变化</h3>${list(events.map((e) => `${time(e.event_at)} · ${e.action || e.reason} ${e.from_level || ""} → ${e.to_level || ""}`))}<p>${action(a.read_at ? "unread" : "read", a.read_at ? "标为未读" : "标为已读")} ${action(a.pinned ? "unpin" : "pin", a.pinned ? "取消固定" : "固定预警")} ${action("resolve","标为已解决")}</p><button class="button secondary" data-asset="${escapeHtml(a.asset_id)}">查看行情与原始依据</button>`;
+    $("#detail-body").innerHTML = `<p>${escapeHtml(a.title)} · ${escapeHtml(alertScores(a))}</p><p>规则 ${escapeHtml(a.rule_id)} · ${escapeHtml(a.rule_version)}</p>${a.patterns?.length ? `<h3>A–F 子模式</h3>${list(a.patterns)}` : ""}${a.context?.sources ? `<h3>研究证据时点</h3>${list(a.context.sources.map(r => `${r.source} · 观察 ${time(r.market_time)} · 可用 ${time(r.available_at)} · ${r.id}`))}` : ""}<p>首次发现 ${time(a.first_seen)} · 最新 ${time(a.last_updated)} · 当时价格 ${price(a.price)}</p><h3>支持证据</h3>${list(a.evidence)}<h3>反向证据</h3>${list(a.contradictions)}<h3>失效条件</h3>${list(a.invalidation_conditions)}<h3>数据新鲜度</h3><p>报价 ${time(snapshot?.market_time)} · 详细 ${time(snapshot?.detail_updated_at)}</p><h3>状态变化</h3>${list(events.map((e) => `${time(e.event_at)} · ${e.action || e.reason} ${e.from_level || ""} → ${e.to_level || ""}`))}<p>${action(a.read_at ? "unread" : "read", a.read_at ? "标为未读" : "标为已读")} ${action(a.pinned ? "unpin" : "pin", a.pinned ? "取消固定" : "固定预警")} ${action("resolve","标为已解决")}</p><button class="button secondary" data-asset="${escapeHtml(a.asset_id)}">查看行情与原始依据</button>`;
     if (!$("#detail").open) $("#detail").showModal();
   } catch (e) {notice(e.message);}
 }

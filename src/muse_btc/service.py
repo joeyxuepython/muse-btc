@@ -27,6 +27,7 @@ from .providers import Providers
 from .ranking import rank_assets
 from .rules import market_regime, usable
 from .storage import Store
+from .strategy_audit import attach_publication, record, save_run
 from .validation import validate_pending
 
 logger = logging.getLogger(__name__)
@@ -249,6 +250,7 @@ class Collector:
 
     def _process_signals(self, snapshots: list[Snapshot], regime: Regime, now: datetime) -> int:
         count = 0
+        evaluations = []
         by_asset = {s.asset_id: s for s in snapshots}
         rankings = {r["asset_id"]: r for r in self.store.rankings(now)}
         for old in self.store.signals(limit=100000, as_of=now):
@@ -276,7 +278,10 @@ class Collector:
                     reason = "价格跌破失效参考位"
                 elif snapshot.risk and snapshot.risk.blockers:
                     reason = "代币风险检查出现阻断项"
-            if regime.risk_mode in ("RISK_OFF", "LEVERAGE_OVERHEAT"):
+            if old.model_version != "context-observation" and regime.risk_mode in (
+                "RISK_OFF",
+                "LEVERAGE_OVERHEAT",
+            ):
                 reason = f"BTC 风险升至 {regime.risk_mode}"
             if reason:
                 self.store.add_event(
@@ -305,10 +310,23 @@ class Collector:
                         }
                     )
                     self.store.save_signal(invalidated)
-                    publish_alert(self.store, invalidated, None, now, self.settings)
+                    alert = publish_alert(self.store, invalidated, None, now, self.settings)
+                    row = []
+                    record(
+                        row,
+                        reference,
+                        old.rule_id,
+                        signal=invalidated,
+                        reasons=[reason],
+                        role="LIFECYCLE",
+                    )
+                    attach_publication(row, invalidated, alert)
+                    row[0]["rule_id"] = "invalidation:" + old.rule_id
+                    evaluations += row
                     count += 1
         for snapshot in snapshots:
-            candidates = decide(snapshot, regime, now, self.settings, self.store)
+            trace = []
+            candidates = decide(snapshot, regime, now, self.settings, self.store, trace)
             for signal in candidates:
                 rank = rankings.get(snapshot.asset_id)
                 previous = self.store.last_signal_time(signal.asset_id, signal.rule_id, signal.kind)
@@ -322,11 +340,25 @@ class Collector:
                         active = self.store.active_alert(signal.asset_id, signal.rule_id, now)
                         if active:
                             signal.id = active["signal_id"]
-                            publish_alert(self.store, signal, rank, now, self.settings)
+                            alert = publish_alert(self.store, signal, rank, now, self.settings)
+                            attach_publication(trace, signal, alert, cooldown=True, regime=regime)
+                        else:
+                            for row in trace:
+                                if row["rule_id"] == signal.rule_id:
+                                    row.update(
+                                        publication="COOLDOWN",
+                                        publication_reason="冷却期内且无活跃预警",
+                                        cooldown=True,
+                                        candidate_id=row["signal_id"],
+                                        signal_id=None,
+                                    )
                     continue
                 self.store.save_signal(signal)
-                publish_alert(self.store, signal, rank, now, self.settings)
+                alert = publish_alert(self.store, signal, rank, now, self.settings)
+                attach_publication(trace, signal, alert, regime=regime)
                 count += 1
+            evaluations += trace
+        save_run(self.store, evaluations, now)
         return count
 
 
