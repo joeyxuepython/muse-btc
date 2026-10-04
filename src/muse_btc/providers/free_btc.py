@@ -11,6 +11,11 @@ CM_METRICS = {
     "CapMVRVCur": ("mvrv", "ratio"),
     "CapMrktCurUSD": ("market_cap", "USD"),
     "SplyCur": ("supply", "BTC"),
+    "AdrActCnt": ("active_addresses", "addresses"),
+    "TxCnt": ("tx_count", "tx"),
+    "FlowInExNtv": ("exchange_inflow", "BTC"),
+    "FlowOutExNtv": ("exchange_outflow", "BTC"),
+    "SplyExNtv": ("exchange_supply", "BTC"),
 }
 BG_METRICS = {
     "sopr": (("sopr",), "ratio"),

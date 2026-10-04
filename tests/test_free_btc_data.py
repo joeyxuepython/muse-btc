@@ -44,6 +44,11 @@ def source_handler(now, calls, *, missing_supply=False, ticker_error=False):
                 "time": chain_day.isoformat(),
                 "CapMVRVCur": "2.5",
                 "CapMrktCurUSD": "2000000000",
+                "AdrActCnt": "700000",
+                "TxCnt": "500000",
+                "FlowInExNtv": "25000",
+                "FlowOutExNtv": "30000",
+                "SplyExNtv": "2500000",
             }
             if not missing_supply:
                 row["SplyCur"] = "19000000"
@@ -113,7 +118,7 @@ async def test_onchain_archive_delay_cache_and_no_research(store, settings, now,
     try:
         first = await engine.collect("onchain")
         assert first["status"] == "COMPLETE"
-        assert len(first["sources"]) == 9
+        assert len(first["sources"]) == 14
         assert len(calls) == 7
         assert not first["research_checks_performed"] and not first["scheduled"]
         summary = engine.summary(now)
@@ -127,7 +132,7 @@ async def test_onchain_archive_delay_cache_and_no_research(store, settings, now,
         second = await engine.collect("onchain")
         assert all(r["status"] == "CACHED" for r in second["sources"])
         assert len(calls) == 7
-        assert len(IntelligenceStore(store).records("onchain", now, latest=False)) == 9
+        assert len(IntelligenceStore(store).records("onchain", now, latest=False)) == 14
         assert IntelligenceStore(store).checks() == []
         with store.connect() as db:
             assert db.execute("PRAGMA user_version").fetchone()[0] == 4
@@ -144,7 +149,7 @@ async def test_missing_coinmetrics_metric_is_individual_failure(store, settings,
         assert result["status"] == "DEGRADED"
         missing = next(r for r in result["sources"] if r["metric"] == "supply")
         assert missing["status"] == "UNAVAILABLE" and missing["reason"]
-        assert len(IntelligenceStore(store).records("onchain", now)) == 8
+        assert len(IntelligenceStore(store).records("onchain", now)) == 13
     finally:
         await providers.close()
 
@@ -342,7 +347,7 @@ def test_btc_api_empty_start_auth_validation_and_onchain_collection(settings, no
         assert client.get("/api/btc").status_code == 401
         headers = {"Authorization": "Bearer FREE_DATA_TEST_TOKEN"}
         empty = client.get("/api/btc", headers=headers).json()
-        assert len(empty["onchain"]) == 9 and all(r["value"] is None for r in empty["onchain"])
+        assert len(empty["onchain"]) == 14 and all(r["value"] is None for r in empty["onchain"])
         assert empty["options"] is None and not calls
         assert (
             client.post(
