@@ -37,6 +37,22 @@ def pre_pump_confirmation(candidate, signal, snapshot, now, settings):
     }
 
 
+def pre_pump_delivery_status(alert, current_price, now):
+    deadline = alert.get("confirmation_deadline")
+    if not deadline:
+        return "SKIP_STALE_DATA"
+    if datetime.fromisoformat(deadline) <= now:
+        return "SKIP_EXPIRED"
+    prices = [alert.get("first_price"), alert.get("notification_price")]
+    if not current_price or not all(prices) or alert.get("max_chase_pct") is None:
+        return "SKIP_STALE_DATA"
+    if any(
+        round((current_price / price - 1) * 100, 6) > alert["max_chase_pct"] for price in prices
+    ):
+        return "SKIP_PRICE_EXTENDED"
+    return "READY"
+
+
 def publish_alert(store, signal, ranking, now, settings):
     level = "WATCH"
     if signal.kind in (SignalKind.RISK, SignalKind.INVALIDATED):

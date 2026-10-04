@@ -272,6 +272,7 @@ def test_alert_query_is_bounded_and_btc_context_is_computed_once(settings, store
         (60, 101, None, "READY"),
         (60, 103, None, "READY"),
         (60, 110, None, "SKIP_PRICE_EXTENDED"),
+        (300, 101, None, "SKIP_EXPIRED"),
         (301, 101, None, "SKIP_EXPIRED"),
         (60, 101, "resolve", "SKIP_RESOLVED"),
     ],
@@ -297,6 +298,16 @@ def test_delivery_eligibility_checks_current_quote_and_expiry(
         assert item["notification_price"] == 100 and item["current_price"] == current_price
         assert item["price_change_since_notification_pct"] == pytest.approx(current_price - 100)
         assert item["notification_age_seconds"] == later_seconds
+        view = client.get("/api/alerts").json()[0]
+        if expected == "READY":
+            assert view["state"] == "ACTIVE"
+        elif expected == "SKIP_RESOLVED":
+            assert view["state"] == "RESOLVED"
+        else:
+            assert view["state"] == "PAUSED" and not view["unread"]
+            assert view["delivery_guard"] == expected
+        if later_seconds == 300:
+            assert view["data_current"]  # Expiry pauses even while both snapshots are fresh.
 
 
 def test_feed_keeps_superseded_history_and_is_authenticated(settings, store, now, monkeypatch):

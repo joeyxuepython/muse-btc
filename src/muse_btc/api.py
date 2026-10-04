@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import AwareDatetime, BaseModel, Field
 
-from .alerts import alert_view, change_alert
+from .alerts import alert_view, change_alert, pre_pump_delivery_status
 from .async_io import run_sync
 from .btc_data import BTCDataEngine
 from .btc_intelligence import apply_btc_context, btc_assessment
@@ -108,9 +108,6 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
                     current and usable(current, now, config) and regime.risk_mode == "NORMAL"
                 )
             result["lifecycle_state"] = result["state"]
-            if result["state"] == "ACTIVE" and not result["data_current"]:
-                result["state"] = "PAUSED"
-                result["unread"] = False
             fresh = bool(current and quote_usable(current, now, config))
             result["current_price"] = current.price if fresh else None
             result["current_price_market_time"] = (
@@ -121,6 +118,16 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             result["price_change_since_notification_pct"] = (
                 round((current.price / price - 1) * 100, 6) if fresh and price else None
             )
+            result["delivery_guard"] = (
+                pre_pump_delivery_status(alert, result["current_price"], now)
+                if alert["level"] == "STRONG" and alert["rule_id"] == "pre-pump-fusion"
+                else None
+            )
+            if result["state"] == "ACTIVE" and (
+                not result["data_current"] or result["delivery_guard"] not in (None, "READY")
+            ):
+                result["state"] = "PAUSED"
+                result["unread"] = False
             results.append(result)
         return results
 
@@ -394,16 +401,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             elif item["level"] == "STRONG" and not item["data_current"]:
                 status = "SKIP_STALE_DATA"
             elif item["level"] == "STRONG" and item["rule_id"] == "pre-pump-fusion":
-                first_price = item.get("first_price")
-                first_gain = (
-                    round((item["current_price"] / first_price - 1) * 100, 6)
-                    if item["current_price"] and first_price
-                    else None
-                )
-                if gain is None or first_gain is None:
-                    status = "SKIP_STALE_DATA"
-                elif max(gain, first_gain) > item["max_chase_pct"]:
-                    status = "SKIP_PRICE_EXTENDED"
+                status = pre_pump_delivery_status(item, item["current_price"], now)
             item["delivery_status"] = status
         page["as_of"] = now.isoformat()
         return page
