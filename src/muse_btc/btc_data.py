@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 
+from .async_io import run_sync
 from .intelligence import EvidenceRecord, IntelligenceStore
 from .liquidations import collect_liquidations
 from .macro import MacroEngine
@@ -63,15 +64,21 @@ class BTCDataEngine:
             )
 
     async def onchain(self):
-        results = self.cached("Coin Metrics", self.settings.btc_onchain_refresh_seconds)
+        results = await run_sync(
+            self.cached, "Coin Metrics", self.settings.btc_onchain_refresh_seconds
+        )
         if results is None:
             results = []
             try:
                 rows, raw, at = await self.provider.coinmetrics()
                 for field, (metric, unit) in CM_METRICS.items():
                     try:
-                        points, rejected = daily_points(rows, (field,), at, coinmetrics=True)
-                        self.archive_points("Coin Metrics", metric, unit, points, raw, at)
+                        points, rejected = await run_sync(
+                            daily_points, rows, (field,), at, coinmetrics=True
+                        )
+                        await run_sync(
+                            self.archive_points, "Coin Metrics", metric, unit, points, raw, at
+                        )
                         results.append(
                             {
                                 "source": "Coin Metrics",
@@ -86,20 +93,22 @@ class BTCDataEngine:
                     except ProviderError as exc:
                         results.append(self.failure("Coin Metrics", metric, exc))
                 if all(r["status"] != "UNAVAILABLE" for r in results):
-                    self.cache("Coin Metrics", results)
+                    await run_sync(self.cache, "Coin Metrics", results)
             except ProviderError as exc:
                 results = [
                     self.failure("Coin Metrics", metric, exc) for metric, _ in CM_METRICS.values()
                 ]
         for metric, (fields, unit) in BG_METRICS.items():
-            cached = self.cached("BGeometrics:" + metric, self.settings.btc_onchain_refresh_seconds)
+            cached = await run_sync(
+                self.cached, "BGeometrics:" + metric, self.settings.btc_onchain_refresh_seconds
+            )
             if cached:
                 results.extend(cached)
                 continue
             try:
                 rows, raw, at, complete = await self.provider.bgeometrics(metric)
-                points, rejected = daily_points(rows, fields, at)
-                self.archive_points("BGeometrics", metric, unit, points, raw, at, 7)
+                points, rejected = await run_sync(daily_points, rows, fields, at)
+                await run_sync(self.archive_points, "BGeometrics", metric, unit, points, raw, at, 7)
                 result = {
                     "source": "BGeometrics",
                     "metric": metric,
@@ -111,7 +120,7 @@ class BTCDataEngine:
                     "latest_observation": points[-1][0].isoformat(),
                     "checked_at": at.isoformat(),
                 }
-                self.cache("BGeometrics:" + metric, [result])
+                await run_sync(self.cache, "BGeometrics:" + metric, [result])
                 results.append(result)
             except ProviderError as exc:
                 results.append(self.failure("BGeometrics", metric, exc))
@@ -128,12 +137,13 @@ class BTCDataEngine:
         }
 
     async def options(self):
-        cached = self.cached("Deribit", self.settings.btc_options_refresh_seconds)
+        cached = await run_sync(self.cached, "Deribit", self.settings.btc_options_refresh_seconds)
         if cached:
             return cached
         try:
             data, raw_ids, at = await self.provider.options()
-            self.archive.save(
+            await run_sync(
+                self.archive.save,
                 EvidenceRecord(
                     kind="options",
                     key="Deribit:BTC:" + at.isoformat(),
@@ -142,7 +152,7 @@ class BTCDataEngine:
                     available_at=at,
                     raw_ids=raw_ids,
                     data=data,
-                )
+                ),
             )
             result = {
                 "source": "Deribit",
@@ -156,7 +166,7 @@ class BTCDataEngine:
                 "errors": data["greeks_errors"],
                 "checked_at": at.isoformat(),
             }
-            self.cache("Deribit", [result])
+            await run_sync(self.cache, "Deribit", [result])
             return [result]
         except ProviderError as exc:
             return [self.failure("Deribit", "options", exc)]
@@ -172,7 +182,7 @@ class BTCDataEngine:
             self.settings.request_timeout_seconds * (self.settings.deribit_greeks_limit + 12) * 4
             + 60,
         )
-        token = self.archive.acquire("btc-free-data", utc_now(), lease_seconds)
+        token = await run_sync(self.archive.acquire, "btc-free-data", utc_now(), lease_seconds)
         if not token:
             return {"status": "BUSY"}
         results = []
@@ -196,16 +206,17 @@ class BTCDataEngine:
                 results.append(
                     await collect_liquidations(self.store, self.settings, liquidation_seconds)
                 )
-            checks = self.store.state("btc_free_checks") or {}
+            checks = await run_sync(self.store.state, "btc_free_checks") or {}
             for r in results:
                 checks[r["source"] + ":" + r.get("metric", "liquidations")] = r
-            self.store.set_state("btc_free_checks", checks)
+            await run_sync(self.store.set_state, "btc_free_checks", checks)
             degraded = any(
                 r.get("data_status", r["status"]) in {"UNAVAILABLE", "DEGRADED", "BUSY"}
                 for r in results
             )
             if self.public:
-                self.public.providers.status(
+                await run_sync(
+                    self.public.providers.status,
                     "BTC Free Data",
                     ProviderState.DEGRADED if degraded else ProviderState.READY,
                     "免费来源已检查；链上延迟和清算采样见分项",
@@ -218,7 +229,7 @@ class BTCDataEngine:
                 "scheduled": False,
             }
         finally:
-            self.archive.release("btc-free-data", token)
+            await run_sync(self.archive.release, "btc-free-data", token)
 
     def series(self, now, source=None, metric=None, limit=1461):
         records = self.archive.records("onchain", now, limit=100000)

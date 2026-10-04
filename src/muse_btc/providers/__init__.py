@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from ..async_io import run_sync
 from ..config import Settings
 from ..models import (
     Candle,
@@ -150,7 +151,7 @@ class Providers:
             mounts=self._proxy_mounts(settings, context),
             follow_redirects=False,
         )
-        self.semaphore = asyncio.Semaphore(4)
+        self.semaphore = asyncio.Semaphore(settings.request_concurrency)
         self.request_locks: dict[str, asyncio.Lock] = {}
         self.next_request: dict[str, float] = {}
         self.metrics: dict[str, dict] = {}
@@ -244,9 +245,13 @@ class Providers:
                 metric["errors"] += 1
                 raise ProviderError(f"公开接口返回 HTTP {response.status_code}")
             try:
-                payload = response.json()
+                payload = await run_sync(response.json)
                 received_at = utc_now()
-                raw_id = self.store.save_raw(source, str(response.url), payload, received_at)
+                archive_started = time.monotonic()
+                raw_id = await run_sync(
+                    self.store.save_raw, source, str(response.url), payload, received_at
+                )
+                metric["last_archive_seconds"] = round(time.monotonic() - archive_started, 4)
             except (ValueError, TypeError) as exc:
                 metric["errors"] += 1
                 raise ProviderError("接口未返回有效 JSON 数据") from exc
@@ -276,7 +281,8 @@ class Providers:
             self.coverage = self.spot.coverage
             self.universe_symbols = self.coverage["symbols"]
             self.futures_source_used = {"OKX"}
-            self.status(
+            await run_sync(
+                self.status,
                 "Binance Spot",
                 ProviderState.READY
                 if len(snapshots) == self.settings.max_altcoins + 2
@@ -291,7 +297,8 @@ class Providers:
                 s.features.oi_change_5m_pct is not None and s.features.funding_rate_pct is not None
                 for s in snapshots
             )
-            self.status(
+            await run_sync(
+                self.status,
                 "OKX Futures",
                 ProviderState.READY
                 if complete == len(snapshots) and snapshots
@@ -307,7 +314,13 @@ class Providers:
             return snapshots
         except (ProviderError, ValueError, KeyError, TypeError) as exc:
             message = str(exc) if isinstance(exc, ProviderError) else "现货或监控池验证失败"
-            self.status("Binance Spot", ProviderState.UNAVAILABLE, message, "V4 BTC/ETH + 山寨现货")
+            await run_sync(
+                self.status,
+                "Binance Spot",
+                ProviderState.UNAVAILABLE,
+                message,
+                "V4 BTC/ETH + 山寨现货",
+            )
             return []
 
     async def memes(self) -> list[Snapshot]:

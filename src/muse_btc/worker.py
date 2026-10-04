@@ -4,6 +4,7 @@ import asyncio
 import math
 from datetime import datetime
 
+from .async_io import run_sync
 from .btc_data import BTCDataEngine
 from .events import EventEngine
 from .intelligence import EvidenceRecord, IntelligenceStore
@@ -54,7 +55,8 @@ class IntelligenceWorker:
             <= self.settings.event_reaction_tolerance_seconds
         ):
             return {"status": "DEGRADED", "reason": "BTC quote stale"}
-        self.archive.save(
+        await run_sync(
+            self.archive.save,
             EvidenceRecord(
                 kind="btc_event_quote",
                 key=market.isoformat(),
@@ -63,15 +65,15 @@ class IntelligenceWorker:
                 available_at=at,
                 raw_ids=[raw],
                 data={"price": price},
-            )
+            ),
         )
         return {"status": "COMPLETE"}
 
     async def execute(self, name):
         started = utc_now()
-        prior = self.store.state("job:" + name) or {}
+        prior = await run_sync(self.store.state, "job:" + name) or {}
         state = {**prior, "name": name, "started_at": started.isoformat(), "status": "RUNNING"}
-        self.store.set_state("job:" + name, state)
+        await run_sync(self.store.set_state, "job:" + name, state)
         try:
             result = await self.jobs[name][1]()
             state.update(status=result.get("status", "DEGRADED"), result=result)
@@ -85,7 +87,7 @@ class IntelligenceWorker:
         finally:
             state["finished_at"] = utc_now().isoformat()
             state["failures"] = 0 if state["status"] == "COMPLETE" else prior.get("failures", 0) + 1
-            self.store.set_state("job:" + name, state)
+            await run_sync(self.store.set_state, "job:" + name, state)
 
     async def tick(self):
         scopes = list(self.settings.background_scopes)
@@ -94,7 +96,7 @@ class IntelligenceWorker:
         for name in scopes:
             if name in self.running and not self.running[name].done():
                 continue
-            prior = self.store.state("job:" + name) or {}
+            prior = await run_sync(self.store.state, "job:" + name) or {}
             anchor = prior.get("started_at" if prior.get("status") == "COMPLETE" else "finished_at")
             elapsed = (
                 (utc_now() - datetime.fromisoformat(anchor)).total_seconds()
@@ -110,14 +112,15 @@ class IntelligenceWorker:
                 self.running[name] = asyncio.create_task(self.execute(name))
 
     async def run(self):
-        token = self.archive.acquire("intelligence-worker", utc_now(), 120)
+        token = await run_sync(self.archive.acquire, "intelligence-worker", utc_now(), 120)
         if not token:
             return {"status": "BUSY"}
         try:
             while True:
-                if not self.archive.renew("intelligence-worker", token, utc_now()):
+                if not await run_sync(self.archive.renew, "intelligence-worker", token, utc_now()):
                     return {"status": "LOST_LEASE"}
-                self.store.set_state(
+                await run_sync(
+                    self.store.set_state,
                     "intelligence_worker",
                     {
                         "heartbeat_at": utc_now().isoformat(),
@@ -131,8 +134,9 @@ class IntelligenceWorker:
             for task in self.running.values():
                 task.cancel()
             await asyncio.gather(*self.running.values(), return_exceptions=True)
-            self.archive.release("intelligence-worker", token)
-            self.store.set_state(
+            await run_sync(self.archive.release, "intelligence-worker", token)
+            await run_sync(
+                self.store.set_state,
                 "intelligence_worker",
                 {
                     "heartbeat_at": utc_now().isoformat(),

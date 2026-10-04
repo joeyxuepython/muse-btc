@@ -2,6 +2,7 @@ import asyncio
 import json
 from datetime import datetime
 
+from ..async_io import run_sync
 from ..features import candle_features, cross_venue_features, depth_features
 from ..models import Candle, Features, Module, Snapshot, utc_now
 from ..universe import CORE, build_universe
@@ -55,7 +56,7 @@ class BinanceSpotProvider:
                 selection_at,
                 [r for r in (info_raw, ticker_raw, swap_raw) if r],
             )
-            self.store.save_universe(self.selection)
+            await run_sync(self.store.save_universe, self.selection)
         else:
             symbols = [r["binance_symbol"] for r in self.selection["entries"]]
             tickers, ticker_raw, at = await self.get(
@@ -66,6 +67,7 @@ class BinanceSpotProvider:
             raise ProviderError("行情接口返回非列表")
         by_symbol = {r["symbol"]: r for r in tickers if isinstance(r, dict) and "symbol" in r}
         selected = self.selection["entries"]
+        previous = {s.symbol: s for s in await run_sync(self.store.latest_snapshots, now)}
         details = set(CORE)
         # Allocate slots by tier without starving lower tiers; checkpoints survive restart.
         remaining = self.settings.detail_batch_size
@@ -73,10 +75,9 @@ class BinanceSpotProvider:
             details.update(r["binance_symbol"] for r in selected)
         else:
             # Optional reduced budget: oldest evidence first; tier only breaks ties.
-            previous_by_symbol = {s.symbol: s for s in self.store.latest_snapshots(now)}
 
             def age_key(entry):
-                old = previous_by_symbol.get(entry["binance_symbol"])
+                old = previous.get(entry["binance_symbol"])
                 return (
                     old.detail_updated_at.timestamp() if old and old.detail_updated_at else 0,
                     entry["tier"],
@@ -86,8 +87,7 @@ class BinanceSpotProvider:
             candidates = [r for r in selected if r["binance_symbol"] not in CORE]
             details.update(r["binance_symbol"] for r in sorted(candidates, key=age_key)[:remaining])
         self.round += 1
-        self.store.set_state("detail_round", self.round)
-        previous = {s.symbol: s for s in self.store.latest_snapshots(now)}
+        await run_sync(self.store.set_state, "detail_round", self.round)
         common = [ticker_raw] + self.selection["raw_ids"] + self.derivatives.bulk_raw_ids
         results = await asyncio.gather(
             *(
@@ -154,6 +154,9 @@ class BinanceSpotProvider:
             raw_ids.extend(old.raw_ids)
             issues = list(old.quality_issues)
         if scheduled:
+            # A full refresh replaces old detail evidence; cached derivative queries
+            # append their actual raw IDs again below. Do not carry a growing lineage.
+            raw_ids = list(dict.fromkeys(common))
             # A failed new check cannot retain old endpoint values as current evidence.
             features, candles, issues = Features(), [], []
             times, received = (

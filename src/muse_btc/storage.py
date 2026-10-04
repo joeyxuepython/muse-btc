@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from .models import Outcome, ProviderStatus, Regime, Signal, SignalEvent, Snapshot, new_id
 
@@ -163,7 +164,12 @@ class Store:
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, allow_nan=False)
         digest = hashlib.sha256(encoded.encode()).hexdigest()
         if len(encoded) > 4096:
-            encoded = "gzip:" + base64.b64encode(gzip.compress(encoded.encode(), mtime=0)).decode()
+            encoded = (
+                "gzip:"
+                + base64.b64encode(
+                    gzip.compress(encoded.encode(), compresslevel=1, mtime=0)
+                ).decode()
+            )
         with self.connect() as db:
             db.execute(
                 "INSERT INTO raw_observations VALUES (?,?,?,?,?,?)",
@@ -171,8 +177,14 @@ class Store:
             )
         return raw_id
 
-    def raw(self, raw_id: str) -> dict | None:
+    def raw(self, raw_id: str, *, endpoint_paths: tuple[str, ...] = ()) -> dict | None:
         with self.connect() as db:
+            if endpoint_paths:
+                metadata = db.execute(
+                    "SELECT endpoint FROM raw_observations WHERE id=?", (raw_id,)
+                ).fetchone()
+                if not metadata or urlsplit(metadata[0]).path not in endpoint_paths:
+                    return None
             row = db.execute("SELECT * FROM raw_observations WHERE id=?", (raw_id,)).fetchone()
         if not row:
             return None
@@ -218,11 +230,12 @@ class Store:
         with self.connect() as db:
             rows = db.execute(
                 """
-                SELECT payload FROM (
-                    SELECT payload, ROW_NUMBER() OVER (
+                SELECT s.payload FROM snapshots s JOIN (
+                    SELECT rowid AS sequence, ROW_NUMBER() OVER (
                         PARTITION BY asset_id ORDER BY available_at DESC, rowid DESC
                     ) AS rank FROM snapshots WHERE available_at<=?
-                ) WHERE rank=1
+                ) latest ON s.rowid=latest.sequence WHERE latest.rank=1
+                ORDER BY s.asset_id
             """,
                 (stamp(as_of),),
             ).fetchall()
@@ -518,8 +531,16 @@ class Store:
                     "evidence_checks",
                 )
             }
+            try:
+                table_bytes = {
+                    row[0]: row[1]
+                    for row in db.execute("SELECT name,SUM(pgsize) FROM dbstat GROUP BY name")
+                }
+            except sqlite3.OperationalError:
+                table_bytes = None  # Some SQLite builds omit the dbstat virtual table.
         return {
             "rows": counts,
+            "table_and_index_bytes": table_bytes,
             "database_bytes": self.path.stat().st_size,
             "wal_bytes": Path(str(self.path) + "-wal").stat().st_size
             if Path(str(self.path) + "-wal").exists()

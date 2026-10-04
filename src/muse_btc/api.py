@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .alerts import alert_view, change_alert
+from .async_io import run_sync
 from .btc_data import BTCDataEngine
 from .btc_intelligence import apply_btc_context, btc_assessment
 from .config import Settings
@@ -152,10 +153,12 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     @app.get("/health")
-    def health():
+    async def health():
         return {
             "status": "ok",
-            "database": "ok",
+            "database": "NOT_CHECKED",
+            "scope": "PROCESS_LIVENESS",
+            "collector": collector.progress(),
             "version": "0.2.0",
             "collector_running": bool(collector.task and not collector.task.done()),
         }
@@ -432,7 +435,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             return await social.collect()
         snapshots = await providers.memes()
         for snapshot in snapshots:
-            store.save_snapshot(snapshot)
+            await run_sync(store.save_snapshot, snapshot)
         return {"snapshots": len(snapshots), "enabled": config.enable_meme_discovery}
 
     @app.get("/api/btc")
@@ -503,13 +506,13 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
     @app.post("/api/experiments/train")
     async def experiment_train(item: TrainRequest):
         at = utc_now()
-        token = archive.acquire("model-training", at, 3600)
+        token = await run_sync(archive.acquire, "model-training", at, 3600)
         if not token:
             return {"status": "BUSY"}
         try:
-            return await asyncio.to_thread(train_model, store, at, config, item.horizon_seconds)
+            return await run_sync(train_model, store, at, config, item.horizon_seconds)
         finally:
-            archive.release("model-training", token)
+            await run_sync(archive.release, "model-training", token)
 
     @app.post("/api/experiments/paid-evaluation")
     def evaluate_paid_source(item: dict):

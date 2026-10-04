@@ -1,8 +1,10 @@
 import asyncio
 import logging
+import time
 from datetime import datetime
 
 from .alerts import publish_alert
+from .async_io import run_sync
 from .btc_intelligence import apply_btc_context
 from .config import Settings
 from .decisions import decide
@@ -37,6 +39,34 @@ class Collector:
         self.task: asyncio.Task | None = None
         self.last_finished_at: datetime | None = None
         self.last_result: dict = {}
+        self.phase = "IDLE"
+        self.phase_started_at = None
+        self.started_at = None
+        self.started_monotonic = None
+        self.phase_durations = {}
+        self.phase_monotonic = None
+
+    def set_phase(self, phase):
+        tick = time.monotonic()
+        if self.phase_monotonic is not None:
+            self.phase_durations[self.phase] = round(tick - self.phase_monotonic, 3)
+        self.phase = phase
+        self.phase_started_at = utc_now()
+        self.phase_monotonic = tick
+
+    def progress(self):
+        return {
+            "phase": self.phase,
+            "busy": self.lock.locked(),
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "phase_started_at": self.phase_started_at.isoformat()
+            if self.phase_started_at
+            else None,
+            "elapsed_seconds": round(time.monotonic() - self.started_monotonic, 3)
+            if self.lock.locked() and self.started_monotonic is not None
+            else None,
+            "phase_seconds": dict(self.phase_durations),
+        }
 
     def initialise_statuses(self) -> None:
         for name, coverage in [
@@ -72,7 +102,7 @@ class Collector:
         )
 
     async def start(self) -> None:
-        self.initialise_statuses()
+        await run_sync(self.initialise_statuses)
         if self.settings.enable_collector:
             self.task = asyncio.create_task(self._loop(), name="muse-collector")
 
@@ -97,7 +127,7 @@ class Collector:
             return {"status": "BUSY", "message": "采集正在进行，请等待本轮结束"}
         async with self.lock:
             archive = IntelligenceStore(self.store)
-            token = archive.acquire("market-collector", utc_now(), 120)
+            token = await run_sync(archive.acquire, "market-collector", utc_now(), 120)
             if not token:
                 return {"status": "BUSY", "message": "另一进程正在采集"}
             owner = asyncio.current_task()
@@ -105,90 +135,26 @@ class Collector:
             async def heartbeat():
                 while True:
                     await asyncio.sleep(30)
-                    if not archive.renew("market-collector", token, utc_now()):
+                    if not await run_sync(archive.renew, "market-collector", token, utc_now()):
                         owner.cancel()
                         return
-                    self.store.set_state("market_heartbeat", utc_now().isoformat())
+                    await run_sync(self.store.set_state, "market_heartbeat", utc_now().isoformat())
 
             pulse = asyncio.create_task(heartbeat())
-            self.store.set_state("market_heartbeat", utc_now().isoformat())
+            self.started_at = utc_now()
+            self.started_monotonic = time.monotonic()
+            self.phase_durations = {}
+            self.phase_monotonic = None
+            self.set_phase("FETCHING")
             try:
+                await run_sync(self.store.set_state, "market_heartbeat", utc_now().isoformat())
                 binance = await self.providers.binance()
                 memes = await self.providers.memes() if self.settings.enable_meme_discovery else []
-                now = utc_now()
-                eth = next((s for s in binance if s.module == Module.ETH), None)
-                btc = next((s for s in binance if s.module == Module.BTC), None)
-                saved = []
-
-                def aligned(snapshot, core):
-                    if (
-                        not core
-                        or not usable(snapshot, now, self.settings)
-                        or not usable(core, now, self.settings)
-                    ):
-                        return False
-                    source = snapshot.component_times.get("candles", snapshot.market_time)
-                    reference = core.component_times.get("candles", core.market_time)
-                    return (
-                        abs((source - reference).total_seconds())
-                        <= self.settings.time_alignment_seconds
-                    )
-
-                for snapshot in binance + memes:
-                    snapshot.decision_at = now
-                    snapshot.features.relative_strength_15m_pct = None
-                    snapshot.features.relative_strength_eth_15m_pct = None
-                    if (
-                        snapshot.module == Module.ALT
-                        and aligned(snapshot, btc)
-                        and snapshot.features.return_15m_pct is not None
-                        and btc.features.return_15m_pct is not None
-                    ):
-                        snapshot.features.relative_strength_15m_pct = (
-                            snapshot.features.return_15m_pct - btc.features.return_15m_pct
-                        )
-                    if (
-                        snapshot.module == Module.ALT
-                        and aligned(snapshot, eth)
-                        and snapshot.features.return_15m_pct is not None
-                        and eth.features.return_15m_pct is not None
-                    ):
-                        snapshot.features.relative_strength_eth_15m_pct = (
-                            snapshot.features.return_15m_pct - eth.features.return_15m_pct
-                        )
-                    try:
-                        if self.settings.enable_intelligence and snapshot.module != Module.MEME:
-                            try:
-                                archive_snapshot_trades(
-                                    self.store, snapshot, self.store.universe(now)
-                                )
-                            except (ValueError, KeyError, TypeError, OverflowError):
-                                snapshot.quality_issues.append("TRADE_ARCHIVE_INVALID")
-                        self.store.save_snapshot(snapshot)
-                        saved.append(snapshot)
-                    except ValueError:
-                        logger.warning("Rejected snapshot: future timestamp or invalid lineage")
-                self.store.save_decision_config(now, self.settings)
-                regime = market_regime(btc if btc in saved else None, now, self.settings)
-                if self.settings.enable_intelligence:
-                    regime = apply_btc_context(
-                        regime, self.store, self.settings, now, btc if btc in saved else None
-                    )
-                self.store.save_regime(regime)
-                ranking = rank_assets(saved, self.store.rankings(now), now, self.settings)
-                if self.settings.enable_intelligence:
-                    ranking = enrich_rankings(ranking, saved, self.store, now, self.settings)
-                self.store.save_rankings(ranking, now)
-                signal_count = self._process_signals(saved, regime, now)
-                outcomes = validate_pending(self.store, now, self.settings)
-                self.last_finished_at = now
-                self.last_result = {
-                    "status": "COMPLETE" if saved else "NO_DATA",
-                    "snapshots": len(saved),
-                    "signals": signal_count,
-                    "outcomes": outcomes,
-                    "finished_at": now.isoformat(),
-                }
+                self.set_phase("PERSISTING")
+                await run_sync(self._process_batch, binance, memes)
+            except asyncio.CancelledError:
+                self.last_result = {"status": "INTERRUPTED", "message": "采集已停止"}
+                raise
             except Exception:
                 logger.exception("Collection cycle failed")
                 self.last_result = {"status": "FAILED", "message": "本轮失败，下一轮自动重试"}
@@ -198,13 +164,93 @@ class Collector:
                     await pulse
                 except asyncio.CancelledError:
                     pass
-                archive.release("market-collector", token)
-                self.store.set_state("market_last_result", self.last_result)
+                await run_sync(archive.release, "market-collector", token)
+                self.set_phase("IDLE")
+                self.last_result.update(
+                    elapsed_seconds=round(time.monotonic() - self.started_monotonic, 3),
+                    phase_seconds=dict(self.phase_durations),
+                )
+                await run_sync(self.store.set_state, "market_last_result", self.last_result)
             return self.last_result
+
+    def _process_batch(self, binance, memes):
+        now = utc_now()
+        eth = next((s for s in binance if s.module == Module.ETH), None)
+        btc = next((s for s in binance if s.module == Module.BTC), None)
+        saved = []
+        registry = self.store.universe(now)
+
+        def aligned(snapshot, core):
+            if (
+                not core
+                or not usable(snapshot, now, self.settings)
+                or not usable(core, now, self.settings)
+            ):
+                return False
+            source = snapshot.component_times.get("candles", snapshot.market_time)
+            reference = core.component_times.get("candles", core.market_time)
+            return abs((source - reference).total_seconds()) <= self.settings.time_alignment_seconds
+
+        for snapshot in binance + memes:
+            snapshot.decision_at = now
+            snapshot.features.relative_strength_15m_pct = None
+            snapshot.features.relative_strength_eth_15m_pct = None
+            if (
+                snapshot.module == Module.ALT
+                and aligned(snapshot, btc)
+                and snapshot.features.return_15m_pct is not None
+                and btc.features.return_15m_pct is not None
+            ):
+                snapshot.features.relative_strength_15m_pct = (
+                    snapshot.features.return_15m_pct - btc.features.return_15m_pct
+                )
+            if (
+                snapshot.module == Module.ALT
+                and aligned(snapshot, eth)
+                and snapshot.features.return_15m_pct is not None
+                and eth.features.return_15m_pct is not None
+            ):
+                snapshot.features.relative_strength_eth_15m_pct = (
+                    snapshot.features.return_15m_pct - eth.features.return_15m_pct
+                )
+            try:
+                if self.settings.enable_intelligence and snapshot.module != Module.MEME:
+                    try:
+                        archive_snapshot_trades(self.store, snapshot, registry)
+                    except (ValueError, KeyError, TypeError, OverflowError):
+                        snapshot.quality_issues.append("TRADE_ARCHIVE_INVALID")
+                self.store.save_snapshot(snapshot)
+                saved.append(snapshot)
+            except ValueError:
+                logger.warning("Rejected snapshot: future timestamp or invalid lineage")
+        self.set_phase("EVALUATING")
+        self.store.save_decision_config(now, self.settings)
+        regime = market_regime(btc if btc in saved else None, now, self.settings)
+        if self.settings.enable_intelligence:
+            regime = apply_btc_context(
+                regime, self.store, self.settings, now, btc if btc in saved else None
+            )
+        self.store.save_regime(regime)
+        ranking = rank_assets(saved, self.store.rankings(now), now, self.settings)
+        if self.settings.enable_intelligence:
+            ranking = enrich_rankings(ranking, saved, self.store, now, self.settings)
+        self.store.save_rankings(ranking, now)
+        signal_count = self._process_signals(saved, regime, now)
+        self.set_phase("VALIDATING")
+        outcomes = validate_pending(self.store, now, self.settings)
+        self.last_finished_at = utc_now()
+        self.last_result = {
+            "status": "COMPLETE" if saved else "NO_DATA",
+            "snapshots": len(saved),
+            "signals": signal_count,
+            "outcomes": outcomes,
+            "finished_at": self.last_finished_at.isoformat(),
+        }
 
     def _process_signals(self, snapshots: list[Snapshot], regime: Regime, now: datetime) -> int:
         count = 0
         by_asset = {s.asset_id: s for s in snapshots}
+        rankings = {r["asset_id"]: r for r in self.store.rankings(now)}
         for old in self.store.signals(limit=100000, as_of=now):
             if old.module == Module.MEME:
                 continue
@@ -264,10 +310,7 @@ class Collector:
         for snapshot in snapshots:
             candidates = decide(snapshot, regime, now, self.settings, self.store)
             for signal in candidates:
-                rank = next(
-                    (r for r in self.store.rankings(now) if r["asset_id"] == snapshot.asset_id),
-                    None,
-                )
+                rank = rankings.get(snapshot.asset_id)
                 previous = self.store.last_signal_time(signal.asset_id, signal.rule_id, signal.kind)
                 if (
                     previous
