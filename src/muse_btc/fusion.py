@@ -93,7 +93,7 @@ def enrich_rankings(rows, snapshots, store, now, settings):
     return rows
 
 
-def pre_pump_signals(snapshot, regime, now, settings, store, trace=None):
+def pre_pump_signals(snapshot, regime, now, settings, store, trace=None, *, context=None):
     if snapshot.module != Module.ALT or not usable(snapshot, now, settings):
         record(
             trace,
@@ -222,7 +222,8 @@ def pre_pump_signals(snapshot, regime, now, settings, store, trace=None):
         groups.add("spot_flow")
     if strength:
         groups.add("relative_strength")
-    context = asset_context(IntelligenceStore(store), snapshot.asset_id, now)
+    if context is None:
+        context = asset_context(IntelligenceStore(store), snapshot.asset_id, now)
     groups.update(context["evidence_groups"])
     evidence.extend(patterns + context["supporting"])
     contradictions = list(context["risks"])
@@ -269,6 +270,21 @@ def pre_pump_signals(snapshot, regime, now, settings, store, trace=None):
             "funding_ready": funding_ready,
             "liquid": liquid,
             "btc_risk_mode": regime.risk_mode,
+            "funding_rate_pct": f.funding_rate_pct if funding_ready else None,
+            "oi_change_5m_pct": f.oi_change_5m_pct
+            if component_usable(snapshot, "oi_history", now, settings)
+            else None,
+            "spread_bps": f.spread_bps
+            if component_usable(snapshot, "book", now, settings)
+            else None,
+            "relative_strength_15m_pct": f.relative_strength_15m_pct,
+        },
+        checks={
+            "evidence_groups": len(groups) >= t["strong_groups"],
+            "derivatives_cool": cool,
+            "liquidity": liquid,
+            "btc_regime": regime.risk_mode == "NORMAL",
+            "asset_context": not context["risks"],
         },
     )
     return [signal]

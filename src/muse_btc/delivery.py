@@ -4,6 +4,8 @@ import hashlib
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
+from .decision_explanation import VERSION, explanation_lines
+
 
 def _time(value):
     return (
@@ -27,6 +29,18 @@ def notification_message(rows, category):
         f"最新价 {_price(latest.get('current_price'))}"
         f"（{_time(latest.get('current_price_market_time'))}，UTC+8）",
     ]
+    changes = list(
+        dict.fromkeys(
+            r.get("notification_reason", "未记录")
+            + (
+                f"（{r['notification_from_level']} → {r['level']}）"
+                if r.get("notification_from_level")
+                else ""
+            )
+            for r in rows
+        )
+    )
+    lines.append("本次变化：" + "；".join(changes) + "。")
     for row in rows:
         if category == "CANCELLATION":
             threshold = row.get("original_invalidation_price")
@@ -85,6 +99,8 @@ def notification_message(rows, category):
             ]
         if row.get("contradictions"):
             lines.append("限制：" + "；".join(row["contradictions"]) + "。")
+    if category != "CANCELLATION":
+        lines += explanation_lines(rows)
     if category in ("LONG", "CANCELLATION"):
         methods = {r.get("invalidation_method") for r in rows}
         lines.append(
@@ -135,6 +151,11 @@ def build_deliveries(items):
                 "symbol": rows[0]["symbol"],
                 "category": key[1],
                 "message_zh": notification_message(rows, key[1]),
+                "decision_explanation_version": VERSION,
+                "decision_explanations": [
+                    {"notification_id": a["notification_id"], "decision": a.get("decision", {})}
+                    for a in rows
+                ],
                 "member_notification_ids": ids,
                 "rule_ids": sorted({a["rule_id"] for a in rows}),
                 "patterns": sorted({p for a in rows for p in a.get("patterns", [])}),
@@ -188,6 +209,7 @@ async def fetch_notification_batch(client, *, after=0, generation=None, page_siz
                 "delivery_groups": build_deliveries(items),
                 "deferred_notification_ids": [a["notification_id"] for a in deferred],
                 "delivery_policy_version": page.get("delivery_policy_version"),
+                "decision_explanation_version": page.get("decision_explanation_version"),
                 "as_of": page["as_of"],
             }
     raise ValueError("Notification batch exceeds 200 pages; cursor was not committed")

@@ -23,7 +23,8 @@ from .async_io import run_sync
 from .btc_data import BTCDataEngine
 from .btc_intelligence import apply_btc_context, btc_assessment
 from .config import Settings
-from .context import import_context
+from .context import asset_contexts, import_context
+from .decision_explanation import VERSION as DECISION_EXPLANATION_VERSION
 from .delivery import build_deliveries, notification_message
 from .events import EventEngine
 from .experiments import paid_evaluation, ranking_report, train_model
@@ -115,6 +116,16 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             # One BTC assessment per request, independent of the number of alerts.
             regime = current_regime(latest.get("binance:BTCUSDT"), now)
         results = []
+        guarded_assets = {
+            a["asset_id"]
+            for a in alerts
+            if a["level"] == "STRONG" and a["rule_id"] in ("spot-led-momentum", "pre-pump-fusion")
+        }
+        contexts = (
+            asset_contexts(archive, guarded_assets, now)
+            if guarded_assets and config.enable_intelligence
+            else {}
+        )
         for alert in notification_projections(store, alerts, now):
             result = alert_view(alert, now)
             snapshot = snapshots.get(alert["snapshot_id"])
@@ -167,6 +178,14 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
                 and current.price < alert["invalidation_price"]
             ):
                 result["delivery_guard"] = "SKIP_INVALIDATION_REACHED"
+            result["current_asset_context"] = (
+                contexts.get(alert["asset_id"])
+                if alert["level"] == "STRONG"
+                and alert["rule_id"] in ("spot-led-momentum", "pre-pump-fusion")
+                else None
+            )
+            if result["current_asset_context"] and result["current_asset_context"]["risks"]:
+                result["delivery_guard"] = "SKIP_CONTEXT_BLOCKED"
             if result["state"] == "ACTIVE" and (
                 not result["data_current"]
                 or result["delivery_guard"] not in (None, "READY")
@@ -267,6 +286,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             "collector": collector.progress(),
             "version": "0.2.0",
             "delivery_policy_version": DELIVERY_POLICY_VERSION,
+            "decision_explanation_version": DECISION_EXPLANATION_VERSION,
             "collector_running": bool(collector.task and not collector.task.done()),
         }
 
@@ -455,6 +475,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             item["data_current"] = bool(live and live["data_current"])
             item["current_quote_fresh"] = bool(live and live["current_quote_fresh"])
             item["current_risk_inputs"] = live.get("current_risk_inputs", {}) if live else {}
+            item["current_asset_context"] = live.get("current_asset_context") if live else None
             price = item.get("notification_price")
             gain = (
                 round((item["current_price"] / price - 1) * 100, 6)
@@ -488,6 +509,8 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
                 status = "LEGACY_REVIEW_REQUIRED"
             elif item["notification_class"] == "ARCHIVE":
                 status = "SKIP_ARCHIVE_ONLY"
+            elif live.get("delivery_guard") == "SKIP_CONTEXT_BLOCKED":
+                status = "SKIP_CONTEXT_BLOCKED"
             elif not item["data_current"] or not item["current_quote_fresh"]:
                 status = "SKIP_STALE_DATA"
             elif item["notification_class"] == "CANCELLATION":
@@ -504,6 +527,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             item["delivery_status"] = status
         page["as_of"] = now.isoformat()
         page["delivery_policy_version"] = DELIVERY_POLICY_VERSION
+        page["decision_explanation_version"] = DECISION_EXPLANATION_VERSION
         page["delivery_groups_preview"] = build_deliveries(page["items"])
         page["grouping_scope"] = "PAGE_PREVIEW_ONLY_DRAIN_BATCH_BEFORE_GROUPING"
         return page

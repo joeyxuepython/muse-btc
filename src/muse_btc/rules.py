@@ -4,7 +4,7 @@ from .config import Settings
 from .models import Module, Regime, Signal, SignalKind, Snapshot
 from .strategy_audit import BASIC_INPUTS, record
 
-RULE_VERSION = "rules-v4-2"
+RULE_VERSION = "rules-v4-3"
 
 
 def component_usable(snapshot: Snapshot, name: str, now: datetime, settings: Settings) -> bool:
@@ -255,18 +255,29 @@ def evaluate(
         and f.oi_change_5m_pct < 2
     )
     liquidity = f.spread_bps is not None and f.spread_bps < 15
-    if momentum and demand and trend and relative:
-        safe_regime = regime.risk_mode == "NORMAL"
-        alignment = (
-            all(
-                key in snapshot.component_times
-                and abs((snapshot.component_times[key] - snapshot.market_time).total_seconds())
-                <= settings.time_alignment_seconds
-                for key in ("funding", "oi", "mark")
-            )
-            if snapshot.component_times
-            else True
+    safe_regime = regime.risk_mode == "NORMAL"
+    alignment = (
+        all(
+            key in snapshot.component_times
+            and abs((snapshot.component_times[key] - snapshot.market_time).total_seconds())
+            <= settings.time_alignment_seconds
+            for key in ("funding", "oi", "mark")
         )
+        if snapshot.component_times
+        else True
+    )
+    checks = {
+        "momentum": momentum,
+        "spot_demand": demand,
+        "ema_trend": trend,
+        "relative_strength": relative,
+        "btc_regime": safe_regime,
+        "derivatives_cool": cool_derivatives,
+        "liquidity": liquidity,
+        "time_alignment": alignment,
+        "no_competing_signal": not result,
+    }
+    if momentum and demand and trend and relative:
         can_enter = safe_regime and cool_derivatives and liquidity and alignment and not result
         kind = SignalKind.ENTRY_CANDIDATE if can_enter else SignalKind.WATCH
         score = 78 if can_enter else 48
@@ -279,6 +290,8 @@ def evaluate(
             contradictions.append("价差偏大或盘口数据不可用")
         if not alignment:
             contradictions.append("现货与衍生品时间不对齐，仅供观察")
+        if result:
+            contradictions.append("同轮已触发其他基础规则信号，暂不升级入场候选")
         result.append(
             _signal(
                 snapshot,
@@ -316,5 +329,6 @@ def evaluate(
                 rule,
                 inputs=inputs,
                 signal=next((s for s in result if s.rule_id == rule), None),
+                checks=checks if rule == "spot-led-momentum" else None,
             )
     return result

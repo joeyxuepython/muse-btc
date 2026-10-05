@@ -1,5 +1,7 @@
 # 策略覆盖、评分与 Muse 推送接入
 
+新增[信号决策解释](decision-explanations.md)：候选、风险、通知与网页保存实际规则链，资产风险否决同步用于现货动量；Muse 正文使用发送组的 `message_zh`，完整规则记录可在 `decision_explanations` 核对。
+
 同一 GIGGLE 的 `spot-led-momentum` 与 `pre-pump-fusion` 曾同时显示机会排行 81.2，风险提醒又使用同一个排行分。这不能证明独立策略确认，也不能按分数衡量风险。本次把分数含义、逐规则运行状态、BTC 上下文观察及发送回执明确分开。
 
 ## 评分与同币合并

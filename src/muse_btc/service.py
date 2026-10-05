@@ -7,6 +7,8 @@ from .alerts import market_risk_status, publish_alert
 from .async_io import run_sync
 from .btc_intelligence import apply_btc_context
 from .config import Settings
+from .context import asset_contexts
+from .decision_explanation import lifecycle_decision
 from .decisions import decide
 from .fusion import enrich_rankings
 from .intelligence import IntelligenceStore
@@ -253,6 +255,18 @@ class Collector:
         evaluations = []
         by_asset = {s.asset_id: s for s in snapshots}
         rankings = {r["asset_id"]: r for r in self.store.rankings(now)}
+        contexts = (
+            {
+                asset_id: r["context"]
+                for asset_id, r in rankings.items()
+                if r.get("context", {}).get("as_of") == now.isoformat()
+            }
+            if self.settings.enable_intelligence
+            else {}
+        )
+        missing_context = set(by_asset) - contexts.keys()
+        if self.settings.enable_intelligence and missing_context:
+            contexts.update(asset_contexts(IntelligenceStore(self.store), missing_context, now))
         for old in self.store.signals(limit=100000, as_of=now):
             if old.module == Module.MEME:
                 continue
@@ -278,6 +292,10 @@ class Collector:
                     reason = "价格跌破失效参考位"
                 elif snapshot.risk and snapshot.risk.blockers:
                     reason = "代币风险检查出现阻断项"
+                elif old.rule_id in ("spot-led-momentum", "pre-pump-fusion") and contexts.get(
+                    old.asset_id, {}
+                ).get("risks"):
+                    reason = "资产背景风险：" + "；".join(contexts[old.asset_id]["risks"])
             if old.model_version != "context-observation" and regime.risk_mode in (
                 "RISK_OFF",
                 "LEVERAGE_OVERHEAT",
@@ -307,6 +325,14 @@ class Collector:
                             "reference_price": reference.price,
                             "parent_signal_id": old.id,
                             "btc_snapshot_id": regime.btc_snapshot_id,
+                            "decision": lifecycle_decision(
+                                old,
+                                reference,
+                                regime,
+                                reason,
+                                now,
+                                context=contexts.get(old.asset_id),
+                            ),
                         }
                     )
                     self.store.save_signal(invalidated)
@@ -326,7 +352,15 @@ class Collector:
                     count += 1
         for snapshot in snapshots:
             trace = []
-            candidates = decide(snapshot, regime, now, self.settings, self.store, trace)
+            candidates = decide(
+                snapshot,
+                regime,
+                now,
+                self.settings,
+                self.store,
+                trace,
+                context=contexts.get(snapshot.asset_id),
+            )
             for row in trace:
                 if (
                     row["rule_id"] not in ("spot-sell-pressure", "leverage-overheat")

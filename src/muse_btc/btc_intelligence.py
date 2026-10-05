@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 
-from .context_observations import mvrv_window, observations, option_sample
+from .context_observations import mvrv_window, observations, option_sample, reference
 from .intelligence import IntelligenceStore
 from .macro import MacroEngine
 from .rules import component_usable, usable
@@ -61,6 +61,7 @@ def btc_assessment(store, settings, now, btc=None):
                 direction
                 * (row["data"]["value"] - row["data"]["previous"])
                 * (1000 if key == "RRPONTSYD" else 1)
+                * 1000000  # WALCL/TGA are millions USD; RRP was converted from billions.
             )
             references.append(row["id"])
     change = (
@@ -159,10 +160,26 @@ def btc_assessment(store, settings, now, btc=None):
         [r.id for r in reviews],
     )
     macro_stress = change is not None and change < 0 and value is not None and value < 0
+    needed = {i for item in dimensions.values() for i in item["record_ids"]}
+    sources = {
+        r["id"]: reference(r)
+        for r in macro["series"] + macro["etf"] + macro["stablecoins"]
+        if r["id"] in needed
+    }
+    sources.update({r.id: reference(r) for r in onchain + options + reviews if r.id in needed})
+    if btc:
+        sources[btc.id] = {
+            "id": btc.id,
+            "source": btc.source,
+            "market_time": btc.market_time.isoformat(),
+            "available_at": btc.available_at.isoformat(),
+        }
+    for item in dimensions.values():
+        item["sources"] = [sources[i] for i in item["record_ids"] if i in sources]
     observed = sum(r["status"] != "MISSING" for r in dimensions.values())
     return {
         "as_of": now.isoformat(),
-        "version": "btc-context-v2",
+        "version": "btc-context-v3",
         "observations": observations(onchain, options, macro, change, value, now, settings, btc),
         "dimensions": dimensions,
         "coverage_pct": round(observed / len(dimensions) * 100, 1),
@@ -192,11 +209,7 @@ def apply_btc_context(regime, store, settings, now, btc):
     regime.macro = result["macro_risk"]
     regime.evidence_coverage_pct = result["coverage_pct"]
     regime.scope = "BTC_SPOT_PERP_WITH_PUBLIC_CONTEXT"
-    regime.research_context = {
-        "version": result["version"],
-        "as_of": result["as_of"],
-        "observations": result["observations"],
-    }
+    regime.research_context = result
     regime.contradictions = [s for s in regime.contradictions if "尚未融合" not in s]
     regime.contradictions.append(f"BTC 综合证据覆盖 {result['coverage_pct']}%；置信度尚未校准")
     if result["macro_risk"] == "CAUTION":
