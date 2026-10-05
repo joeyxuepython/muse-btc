@@ -10,6 +10,7 @@ from .config import Settings
 from .context import asset_contexts
 from .decision_explanation import lifecycle_decision
 from .decisions import decide
+from .entry_quality import ENTRY_RULES, quality_contexts
 from .fusion import enrich_rankings
 from .intelligence import IntelligenceStore
 from .microstructure import archive_snapshot_trades
@@ -253,6 +254,7 @@ class Collector:
     def _process_signals(self, snapshots: list[Snapshot], regime: Regime, now: datetime) -> int:
         count = 0
         evaluations = []
+        qualities = quality_contexts(self.store, now, self.settings, snapshots)
         by_asset = {s.asset_id: s for s in snapshots}
         rankings = {r["asset_id"]: r for r in self.store.rankings(now)}
         contexts = (
@@ -296,6 +298,15 @@ class Collector:
                     old.asset_id, {}
                 ).get("risks"):
                     reason = "资产背景风险：" + "；".join(contexts[old.asset_id]["risks"])
+                elif (
+                    self.settings.enable_entry_quality
+                    and old.kind == SignalKind.ENTRY_CANDIDATE
+                    and old.rule_id in ENTRY_RULES
+                    and qualities.get(old.asset_id, {})
+                    .get("entry_quality", {})
+                    .get("support_withdrawn")
+                ):
+                    reason = "连续新观测显示现货主动买入低于 45%，买入支撑消失"
             if old.model_version != "context-observation" and regime.risk_mode in (
                 "RISK_OFF",
                 "LEVERAGE_OVERHEAT",
@@ -360,6 +371,7 @@ class Collector:
                 self.store,
                 trace,
                 context=contexts.get(snapshot.asset_id),
+                quality=qualities.get(snapshot.asset_id),
             )
             for row in trace:
                 if (
@@ -385,7 +397,9 @@ class Collector:
                     )
             for signal in candidates:
                 rank = rankings.get(snapshot.asset_id)
-                previous = self.store.last_signal_time(signal.asset_id, signal.rule_id, signal.kind)
+                previous = self.store.last_signal_time(
+                    signal.asset_id, signal.rule_id, signal.kind, rule_version=signal.rule_version
+                )
                 risk_reactivated = signal.kind == SignalKind.RISK and not self.store.active_alert(
                     signal.asset_id, signal.rule_id, now
                 )

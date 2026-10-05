@@ -53,6 +53,8 @@ def notification_message(rows, category):
                 else "原阈值未记录"
             )
             reason = row.get("cancellation_reason", "；".join(row.get("evidence", [])))
+            if "价格跌破失效参考位" not in reason:
+                recovery = "本次按条件变化撤销；原候选不会自动恢复"
             lines += [
                 f"{row['rule_id']}：原候选参考价 {_price(row.get('original_candidate_price'))}"
                 f"（{_time(row.get('original_candidate_at'))}），"

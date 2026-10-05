@@ -131,7 +131,11 @@ def pre_pump_signals(snapshot, regime, now, settings, store, trace=None, *, cont
     if flat and oi and cool:
         patterns.append("B: 温和价格 / 头寸建立")
         groups.update(("price", "derivatives"))
-    if spot and f.spot_perp_structure == "SPOT_LED_HYPOTHESIS":
+    if (
+        spot
+        and component_usable(snapshot, "taker", now, settings)
+        and f.spot_perp_structure == "SPOT_LED_HYPOTHESIS"
+    ):
         patterns.append("C: 现货先行")
         groups.update(("spot_flow", "cross_venue"))
     if oi and funding_ready and f.funding_rate_pct < 0 and (f.return_5m_pct or 0) > 0:
@@ -140,6 +144,7 @@ def pre_pump_signals(snapshot, regime, now, settings, store, trace=None, *, cont
     btc = store.snapshot(regime.btc_snapshot_id) if regime.btc_snapshot_id else None
     btc_flat = (
         btc
+        and usable(btc, now, settings)
         and btc.features.return_15m_pct is not None
         and abs(btc.features.return_15m_pct) <= t["flat_price_pct"]
     )
@@ -152,12 +157,16 @@ def pre_pump_signals(snapshot, regime, now, settings, store, trace=None, *, cont
         if s.id != snapshot.id
         and s.component_times.get("book")
         and component_usable(s, "book", now, settings)
+        and s.available_at < snapshot.available_at
     ]
     if old:
         previous = old[-1].features
         if (
             flat
             and spot
+            and component_usable(snapshot, "book", now, settings)
+            and f.spot_depth_bands.get("1", {}).get("complete_band") is True
+            and previous.spot_depth_bands.get("1", {}).get("complete_band") is True
             and f.spot_cvd_window is not None
             and previous.spot_cvd_window is not None
             and f.spot_cvd_window > previous.spot_cvd_window
@@ -195,9 +204,18 @@ def pre_pump_signals(snapshot, regime, now, settings, store, trace=None, *, cont
                 inputs["btc_return_15m_pct"] = (
                     btc.features.return_15m_pct if btc and usable(btc, now, settings) else None
                 )
+            if pattern == "C" and not component_usable(snapshot, "taker", now, settings):
+                inputs["spot_perp_structure"] = None
             if pattern == "F":
                 inputs["previous_cvd"] = old[-1].features.spot_cvd_window if old else None
-                inputs["previous_ask_depth"] = old[-1].features.ask_depth_1pct_usd if old else None
+                if f.spot_depth_bands.get("1", {}).get("complete_band") is not True:
+                    inputs["ask_depth_1pct_usd"] = None
+                inputs["previous_ask_depth"] = (
+                    old[-1].features.ask_depth_1pct_usd
+                    if old
+                    and old[-1].features.spot_depth_bands.get("1", {}).get("complete_band") is True
+                    else None
+                )
             record(
                 trace,
                 snapshot,
@@ -224,6 +242,7 @@ def pre_pump_signals(snapshot, regime, now, settings, store, trace=None, *, cont
         groups.add("relative_strength")
     if context is None:
         context = asset_context(IntelligenceStore(store), snapshot.asset_id, now)
+    market_groups = set(groups)
     groups.update(context["evidence_groups"])
     evidence.extend(patterns + context["supporting"])
     contradictions = list(context["risks"])
@@ -236,8 +255,24 @@ def pre_pump_signals(snapshot, regime, now, settings, store, trace=None, *, cont
         and f.spread_bps is not None
         and f.spread_bps <= t["max_spread_bps"]
     )
+    aligned = (
+        all(
+            component_usable(snapshot, k, now, settings)
+            and abs((snapshot.component_times[k] - snapshot.market_time).total_seconds())
+            <= settings.time_alignment_seconds
+            for k in ("funding", "oi", "mark")
+        )
+        if snapshot.component_times
+        else True
+    )
+    if not spot:
+        contradictions.append("尚无实际现货主动买入确认")
+    if not aligned:
+        contradictions.append("现货与衍生品时间不对齐")
     strong = (
-        len(groups) >= t["strong_groups"]
+        len(market_groups) >= t["strong_groups"]
+        and spot
+        and aligned
         and cool
         and liquid
         and regime.risk_mode == "NORMAL"
@@ -255,7 +290,7 @@ def pre_pump_signals(snapshot, regime, now, settings, store, trace=None, *, cont
         min(95, 15 * len(groups)),
         contradictions,
     )
-    signal.rule_version = "fusion-v4-3:" + settings.threshold_version
+    signal.rule_version = "fusion-v4-4:" + settings.threshold_version
     signal.signal_version = "signals-v4-3"
     signal.patterns = patterns
     signal.context = regime.research_context
@@ -267,6 +302,7 @@ def pre_pump_signals(snapshot, regime, now, settings, store, trace=None, *, cont
         inputs={
             "patterns": patterns,
             "evidence_groups": sorted(groups),
+            "market_evidence_groups": sorted(market_groups),
             "funding_ready": funding_ready,
             "liquid": liquid,
             "btc_risk_mode": regime.risk_mode,
@@ -280,7 +316,9 @@ def pre_pump_signals(snapshot, regime, now, settings, store, trace=None, *, cont
             "relative_strength_15m_pct": f.relative_strength_15m_pct,
         },
         checks={
-            "evidence_groups": len(groups) >= t["strong_groups"],
+            "evidence_groups": len(market_groups) >= t["strong_groups"],
+            "spot_demand_confirmed": spot,
+            "time_alignment": aligned,
             "derivatives_cool": cool,
             "liquidity": liquid,
             "btc_regime": regime.risk_mode == "NORMAL",

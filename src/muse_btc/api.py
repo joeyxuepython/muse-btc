@@ -25,7 +25,10 @@ from .btc_intelligence import apply_btc_context, btc_assessment
 from .config import Settings
 from .context import asset_contexts, import_context
 from .decision_explanation import VERSION as DECISION_EXPLANATION_VERSION
+from .decisions import decide
 from .delivery import build_deliveries, notification_message
+from .entry_quality import VERSION as ENTRY_QUALITY_VERSION
+from .entry_quality import quality_contexts
 from .events import EventEngine
 from .experiments import paid_evaluation, ranking_report, train_model
 from .intelligence import ContextInput, IntelligenceStore
@@ -126,6 +129,28 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             if guarded_assets and config.enable_intelligence
             else {}
         )
+        qualities = (
+            quality_contexts(store, now, config, list(latest.values()))
+            if guarded_assets
+            and (config.enable_entry_quality or config.market_confirmation_mode == "require")
+            else {}
+        )
+        current_candidates = {}
+        for asset_id in guarded_assets:
+            current = latest.get(asset_id)
+            if current and qualities:
+                current_candidates[asset_id] = {
+                    s.rule_id: s
+                    for s in decide(
+                        current,
+                        regime,
+                        now,
+                        config,
+                        store,
+                        context=contexts.get(asset_id),
+                        quality=qualities.get(asset_id),
+                    )
+                }
         for alert in notification_projections(store, alerts, now):
             result = alert_view(alert, now)
             snapshot = snapshots.get(alert["snapshot_id"])
@@ -186,6 +211,13 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             )
             if result["current_asset_context"] and result["current_asset_context"]["risks"]:
                 result["delivery_guard"] = "SKIP_CONTEXT_BLOCKED"
+            if alert["asset_id"] in current_candidates and alert["level"] == "STRONG":
+                candidate = current_candidates[alert["asset_id"]].get(alert["rule_id"])
+                result["current_entry_assessment"] = qualities.get(alert["asset_id"])
+                if (candidate is None or candidate.kind != "ENTRY_CANDIDATE") and result[
+                    "delivery_guard"
+                ] in (None, "READY"):
+                    result["delivery_guard"] = "SKIP_ENTRY_NOT_CONFIRMED"
             if result["state"] == "ACTIVE" and (
                 not result["data_current"]
                 or result["delivery_guard"] not in (None, "READY")
@@ -287,6 +319,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             "version": "0.2.0",
             "delivery_policy_version": DELIVERY_POLICY_VERSION,
             "decision_explanation_version": DECISION_EXPLANATION_VERSION,
+            "entry_quality_version": ENTRY_QUALITY_VERSION,
             "collector_running": bool(collector.task and not collector.task.done()),
         }
 
@@ -476,6 +509,9 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             item["current_quote_fresh"] = bool(live and live["current_quote_fresh"])
             item["current_risk_inputs"] = live.get("current_risk_inputs", {}) if live else {}
             item["current_asset_context"] = live.get("current_asset_context") if live else None
+            item["current_entry_assessment"] = (
+                live.get("current_entry_assessment") if live else None
+            )
             price = item.get("notification_price")
             gain = (
                 round((item["current_price"] / price - 1) * 100, 6)
@@ -511,6 +547,8 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
                 status = "SKIP_ARCHIVE_ONLY"
             elif live.get("delivery_guard") == "SKIP_CONTEXT_BLOCKED":
                 status = "SKIP_CONTEXT_BLOCKED"
+            elif live.get("delivery_guard") == "SKIP_ENTRY_NOT_CONFIRMED":
+                status = "SKIP_ENTRY_NOT_CONFIRMED"
             elif not item["data_current"] or not item["current_quote_fresh"]:
                 status = "SKIP_STALE_DATA"
             elif item["notification_class"] == "CANCELLATION":
@@ -606,6 +644,18 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
     @app.get("/api/validation")
     def validation():
         return validation_report(store, config)
+
+    @app.get("/api/quality")
+    def entry_quality():
+        now = utc_now()
+        return {
+            "version": ENTRY_QUALITY_VERSION,
+            "as_of": now.isoformat(),
+            "enabled": config.enable_entry_quality,
+            "market_confirmation_mode": config.market_confirmation_mode,
+            "assets": quality_contexts(store, now, config),
+            "production_accuracy": "NOT_ESTABLISHED",
+        }
 
     @app.get("/api/intelligence")
     def intelligence_overview():

@@ -8,6 +8,11 @@ RULE_VERSION = "rules-v4-3"
 
 
 def component_usable(snapshot: Snapshot, name: str, now: datetime, settings: Settings) -> bool:
+    if snapshot.available_at > now:
+        return False
+    received = snapshot.component_received_at.get(name)
+    if received is not None and received > min(now, snapshot.available_at):
+        return False
     if not snapshot.component_times:
         return usable(snapshot, now, settings)  # Compatibility with historical V1 snapshots.
     timestamp = snapshot.component_times.get(name)
@@ -16,7 +21,11 @@ def component_usable(snapshot: Snapshot, name: str, now: datetime, settings: Set
         if name in ("oi_history", "taker", "long_short", "elite_accounts", "elite_positions")
         else settings.stale_seconds
     )
-    return timestamp is not None and 0 <= (now - timestamp).total_seconds() <= maximum
+    return (
+        timestamp is not None
+        and timestamp <= snapshot.available_at
+        and 0 <= (now - timestamp).total_seconds() <= maximum
+    )
 
 
 def quote_usable(snapshot: Snapshot, now: datetime, settings: Settings) -> bool:
@@ -32,6 +41,7 @@ def usable(snapshot: Snapshot, now: datetime, settings: Settings) -> bool:
         "CANDLE_GAPS",
         "DUPLICATE_CANDLES",
         "INVALID_TAKER_VOLUME",
+        "INVALID_CANDLE_VALUES",
         "INSUFFICIENT_CANDLE_HISTORY",
         "FUTURE_MARKET_TIMESTAMP",
     }

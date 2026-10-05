@@ -228,5 +228,7 @@ class Outcome(Record):
     round_trip_cost_bps: float
     sample_count: int
     max_observation_gap_seconds: float
+    max_allowed_gap_seconds: float | None = None
+    label_available_at: AwareDatetime | None = None
     time_to_mfe_seconds: float | None = None
     time_to_mae_seconds: float | None = None
