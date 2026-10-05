@@ -66,6 +66,9 @@ def record(
 
 
 def attach_publication(trace, signal, alert, *, cooldown=False, regime=None):
+    queued = alert["level"] in ("STRONG", "CRITICAL_RISK") or (
+        alert.get("notification_class") == "CANCELLATION" and alert.get("parent_had_strong_notice")
+    )
     for row in trace:
         if row["rule_id"] != signal.rule_id:
             continue
@@ -76,12 +79,8 @@ def attach_publication(trace, signal, alert, *, cooldown=False, regime=None):
             published_level=alert["level"],
             cooldown=cooldown,
             publication_reason=alert.get("confirmation_reason"),
-            notification_id=alert.get("notification_id")
-            if alert["level"] in ("STRONG", "CRITICAL_RISK")
-            else None,
-            delivery="AWAITING_RECEIPT"
-            if alert["level"] in ("STRONG", "CRITICAL_RISK")
-            else "BELOW_DELIVERY_LEVEL",
+            notification_id=alert.get("notification_id") if queued else None,
+            delivery="AWAITING_RECEIPT" if queued else "BELOW_DELIVERY_LEVEL",
         )
         if alert.get("requested_level") == "STRONG" and alert["level"] != "STRONG":
             row["publication"] = "BLOCKED_CONFIRMATION"

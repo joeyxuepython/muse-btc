@@ -104,6 +104,9 @@ class Store:
                 CREATE TABLE IF NOT EXISTS notification_receipts (
                     notification_id TEXT PRIMARY KEY, payload TEXT NOT NULL
                 );
+                CREATE INDEX IF NOT EXISTS notification_signal_lookup ON alert_notifications(
+                    json_extract(payload,'$.signal_id'),event_at
+                );
                 CREATE TABLE IF NOT EXISTS strategy_runs (
                     batch_id TEXT PRIMARY KEY, as_of TEXT NOT NULL, payload TEXT NOT NULL
                 );
@@ -697,6 +700,47 @@ class Store:
                 result.update({r[0]: json.loads(r[1]) for r in rows})
         return result
 
+    def notification_origins(self, signal_ids, now):
+        """Published STRONG revisions and their self-reported delivery, bounded by IDs/time."""
+        result = {}
+        ids = list(dict.fromkeys(signal_ids))
+        with self.connect() as db:
+            for start in range(0, len(ids), 500):
+                batch = ids[start : start + 500]
+                rows = db.execute(
+                    "SELECT n.payload,r.payload FROM alert_notifications n "
+                    "LEFT JOIN notification_receipts r ON r.notification_id=n.notification_id "
+                    "WHERE json_extract(n.payload,'$.signal_id') IN ("
+                    + ",".join("?" for _ in batch)
+                    + ") AND n.event_at<=? "
+                    "AND json_extract(n.payload,'$.level')='STRONG' ORDER BY n.sequence",
+                    [*batch, stamp(now)],
+                ).fetchall()
+                for payload, receipt in rows:
+                    item = json.loads(payload)
+                    item["receipt"] = json.loads(receipt) if receipt else {}
+                    if (
+                        item["receipt"]
+                        and datetime.fromisoformat(item["receipt"]["received_at"]) > now
+                    ):
+                        item["receipt"] = {}
+                    result.setdefault(item["signal_id"], []).append(item)
+        return result
+
+    def signals_by_ids(self, ids):
+        result = {}
+        with self.connect() as db:
+            for start in range(0, len(ids), 500):
+                batch = ids[start : start + 500]
+                rows = db.execute(
+                    "SELECT id,payload FROM signals WHERE id IN ("
+                    + ",".join("?" for _ in batch)
+                    + ")",
+                    batch,
+                ).fetchall()
+                result.update({r[0]: Signal.model_validate_json(r[1]) for r in rows})
+        return result
+
     def save_notification_receipt(self, ids, status, message_id, reason, now):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -734,7 +778,7 @@ class Store:
                 (
                     alert["id"],
                     alert["asset_id"],
-                    alert["rule_id"],
+                    alert.get("storage_rule_id", alert["rule_id"]),
                     alert["last_updated"],
                     json.dumps(alert, allow_nan=False),
                 ),
@@ -749,7 +793,11 @@ class Store:
                         json.dumps(event, allow_nan=False),
                     ),
                 )
-                if event.get("notification_id") and alert["level"] in ("STRONG", "CRITICAL_RISK"):
+                if event.get("notification_id") and (
+                    alert["level"] in ("STRONG", "CRITICAL_RISK")
+                    or alert.get("notification_class") == "CANCELLATION"
+                    and alert.get("parent_had_strong_notice")
+                ):
                     db.execute(
                         "INSERT INTO alert_notifications "
                         "(notification_id,alert_id,event_at,payload) VALUES (?,?,?,?)",

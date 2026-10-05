@@ -137,6 +137,7 @@ def _signal(
         if kind == SignalKind.ENTRY_CANDIDATE
         else None,
         invalidation_price=stop_price if opportunity else None,
+        invalidation_method="ATR_2_FLOOR_0_5_FALLBACK_2" if opportunity else None,
         invalidation_conditions=[
             "价格跌破失效参考位",
             "BTC 风险升至 RISK_OFF 或杠杆过热",

@@ -13,7 +13,30 @@
 | `original_signal_evidence_score` | 失效通知保留的原信号证据分；不是当前风险评分 |
 | `patterns` | 实际匹配的 A–F 子模式。属于一条融合规则，不能算六套独立策略 |
 
-旧载荷返回 `score_schema=LEGACY_UNSEPARATED` 和 `legacy_score`，不猜测旧分数含义。历史归档保留原样。网页把同币、同状态、同观察期限的机会条件合并，保留各规则详情；风险和 BTC 研究观察独立显示。
+旧载荷返回 `score_schema=LEGACY_UNSEPARATED` 和 `legacy_score`，不猜测旧分数含义。历史归档保留原样。网页把同币、同状态、同观察期限的机会条件合并，保留各规则详情；市场风险和 BTC 研究观察独立显示，同币同原因的候选撤销合并。
+
+## 只在明确变化时提醒
+
+用户同时关注短线机会和 BTC/ETH 整体风险。日常发送以新的候选、证据组合/级别改变、新出现的市场风险和必要候选撤销为主。价格、排行分或证据中的数值小幅更新只刷新网页，不产生新通知；风险解除后再次触发可以重新提醒，不被旧冷却期吞掉。
+
+| `notification_class` | 发送条件 |
+| --- | --- |
+| `OPPORTUNITY` | STRONG 候选，数据与 BTC 背景可用；当前价未低于通知记录的失效阈值；pre-pump 还须通过确认时限和追涨保护 |
+| `MARKET_RISK` | 当前市场风险。行情新鲜，已知的卖压/杠杆过热规则重新核实仍成立；不按机会分评估风险 |
+| `CANCELLATION` | 原 STRONG 通知有 Muse 的 SENT 回执，且仍在原候选观察期限内。不是新的看空信号；同币同原因合并 |
+| `ARCHIVE` | 普通观察与研究背景留在网页/归档，不进入即时推送 |
+
+普通 WATCH 的失效只保存 INFO 记录，不升级为 CRITICAL_RISK，不进入发送队列。原 STRONG 尚无发送确认时，撤销为 `WAIT_PARENT_RECEIPT`，等待回执；原通知明确 SKIPPED 或根本没有入场级通知时为 `SKIP_UNDELIVERED_PARENT`。FAILED 也可能是通道发送结果不明，保持等待直至回执确认或撤销过期。
+
+撤销的观察期限从原候选通知时点加 `horizon_seconds` 计算，并受原信号有效期约束；普通交易所候选通常 1h。它和 pre-pump 的 5 分钟确认/发送期限不同。市场风险和撤销消息自身默认必须在 5 分钟内处理，可通过 `MUSE_RISK_NOTIFICATION_MAX_AGE_SECONDS=300` 调整；最新行情仍须满足 `MUSE_STALE_SECONDS`。延迟、已消退的卖压、数据不完整、原候选已过观察期均不发送，只保留记录。BTC/ETH 当前市场风险继续使用已有规则，BTC 的 MVRV/持有人成本/期权/宏观研究观察仍未成为经验证的自动入场策略。
+
+旧队列也应用这些读取时检查：从归档信号恢复类型与原候选关联，不改写旧通知。旧失效载荷的 `level` 可能仍是 CRITICAL_RISK，消费程序必须按 `notification_class`、`delivery_status` 筛选；网页使用 `display_level`，避免把旧失效记录呈现为当前重要风险。
+
+每组提供确定性的中文 `message_zh`。机会包含参考区间、失效规则阈值、最新报价时间与限制；市场风险使用当前输入；撤销区分原候选参考价、失效当时报价、最新价及原阈值，价格回到旧阈值之上时明确注明，不自动恢复原候选。阈值通常按 2×ATR、0.5% 最小距离计算，ATR 缺失回退 2%，阈值最低为原参考价 1%；并非经过验证的关键支撑位。
+
+`parent_signal_id`、`parent_notification_ids`、`original_candidate_price/at`、`original_notice_sent_at`、`original_invalidation_price`、`parent_observation_expires_at` 保存关联。历史数据或回执缺失保持未知，禁止补造价格、关键支撑、收益目标、胜率或“此路不通”等结论。Muse 可以加简洁排版，直接使用 `message_zh` 内容，邮件标题按发送组数量计数。
+
+部署后 `/health` 和通知接口必须返回 `delivery_policy_version=meaningful-change-v2`。这个标记只确认代码策略版本，不证明云端行情、推送接入或邮件送达。
 
 ## 查看哪些规则运行了
 
@@ -58,14 +81,18 @@ from muse_btc.delivery import fetch_notification_batch
 batch = await fetch_notification_batch(client, after=after, generation=generation)
 for group in batch["delivery_groups"]:
     # 先把组及所有成员 ID 写入 Muse 自己的持久发送队列。
-    # 使用 delivery_id 作通道幂等键；成员分数逐条展示，不求和。
+    # 使用 delivery_id 作通道幂等键；正文采用 group["message_zh"]。
     # 发送前复核成员状态/截止时间；再调用已经接好的邮件通道。
     # 成功后 POST /api/alerts/notifications/receipts，报告所有成功发送的成员。
     pass
-# 仅当每条通知已发送或明确处理跳过后，才持久保存 next_cursor/generation。
+# WAIT_PARENT_RECEIPT 不能写 SKIPPED；从 commit_cursor 重新读取等待回执的通知。
+# 其他通知发送或明确处理后才持久保存 commit_cursor/generation。
+# FAILED / LEGACY_REVIEW_REQUIRED 仍按本地队列重试或人工对账流程处理。
 ```
 
-该函数最多排空 200 页；任何 HTTP/游标错误都抛出，不提交水位。风险逐条保留，机会按资产及观察期限合并，`member_notification_ids` 包含该组的全部成员，`independent_strategy_count=null`。已 SENT/SKIPPED 的成员不会重新进入发送组；FAILED 可以重试。
+该函数最多排空 200 页；任何 HTTP/游标错误都抛出，不提交水位。市场风险逐条保留，机会按资产及观察期限合并，撤销按资产及原因合并；三类互不覆盖。`member_notification_ids` 包含该组的全部成员，`parent_signal_ids` 保留撤销对应的原候选，`independent_strategy_count=null`。已 SENT/SKIPPED 的成员不会重新进入发送组；FAILED 可以重试。
+
+`next_cursor` 是已读水位；`deferred_notification_ids` 包含等待原通知发送回执的撤销，`commit_cursor` 在这些通知之前停止，防止下一轮漏读。处理其他 READY 组并写回所有成员回执后，可保存 `commit_cursor`，下轮重新排空，已发成员会被回执去重。只有消费者已将等待项可靠地持久保存、并实现后续资格复查时，才可越过等待项保存 `next_cursor`。这些水位字段不代替消费者的发送事务或失败处理。
 
 回执请求示例：
 
