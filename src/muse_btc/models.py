@@ -201,6 +201,7 @@ class Signal(Record):
     model_version: str = "rules-only"
     patterns: list[str] = []
     context: dict = {}
+    decision: dict = {}
 
 
 class SignalEvent(Record):

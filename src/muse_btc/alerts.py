@@ -1,6 +1,8 @@
 import re
+from copy import deepcopy
 from datetime import datetime, timedelta
 
+from .decision_explanation import semantic_signature
 from .models import SignalKind, new_id
 from .rules import component_usable, usable
 
@@ -191,6 +193,19 @@ def publish_alert(store, signal, ranking, now, settings):
     opportunity_score = ranking["score"] if ranking else None
     at = now.isoformat()
     payload = signal.model_dump(mode="json")
+    decision = deepcopy(signal.decision)
+    if decision:
+        decision["publication"] = {
+            "requested_level": requested_level,
+            "level": level,
+            "confirmation_status": confirmation.get("confirmation_status"),
+            "confirmation_deadline": confirmation.get("confirmation_deadline"),
+            "gain_since_first_seen_pct": confirmation.get("gain_since_first_seen_pct"),
+            "max_chase_pct": confirmation.get("max_chase_pct"),
+            "reason": confirmation.get("confirmation_reason"),
+            "ranking_role": "DISPLAY_ORDER_ONLY",
+            "opportunity_score": opportunity_score,
+        }
     event = None
     if candidate:
         changed = (
@@ -200,6 +215,11 @@ def publish_alert(store, signal, ranking, now, settings):
             or evidence_signature(candidate["contradictions"]) != evidence_signature(contradictions)
             or set(candidate["evidence_groups"]) != set(signal.evidence_groups)
             or candidate["rule_version"] != signal.rule_version
+            or (
+                candidate.get("decision")
+                and decision
+                and semantic_signature(candidate["decision"]) != semantic_signature(decision)
+            )
         )
         if changed:
             event = {
@@ -333,6 +353,7 @@ def publish_alert(store, signal, ranking, now, settings):
             "max_chase_pct": confirmation.get("max_chase_pct"),
             "patterns": signal.patterns,
             "context": signal.context,
+            "decision": decision,
             "horizon_seconds": signal.horizon_seconds,
             "score_limitations": "机会分用于横向排名；规则证据分未校准；风险等级不由分数换算",
         }

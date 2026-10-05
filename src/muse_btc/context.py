@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import AwareDatetime, ConfigDict, Field
 
+from .context_observations import reference
 from .intelligence import ContextInput, EvidenceRecord, IntelligenceStore, canonical_url
 from .models import Record
 
@@ -178,27 +179,60 @@ def import_context(store, item: ContextInput, now: datetime):
     )
 
 
-def asset_context(archive, asset_id, now):
+def asset_contexts(archive, asset_ids, now):
     records = [
-        r
-        for kind in ("catalyst", "tokenomics", "fundamental")
-        for r in archive.records(kind, now)
-        if r.data.get("asset_id") == asset_id
+        r for kind in ("catalyst", "tokenomics", "fundamental") for r in archive.records(kind, now)
     ]
+    return {
+        asset_id: asset_context(archive, asset_id, now, records=records) for asset_id in asset_ids
+    }
+
+
+def asset_context(archive, asset_id, now, *, records=None):
+    if records is None:
+        records = [
+            r
+            for kind in ("catalyst", "tokenomics", "fundamental")
+            for r in archive.records(kind, now)
+        ]
+    records = [r for r in records if r.data.get("asset_id") == asset_id and r.market_time <= now]
     supporting, risks, groups, missing = [], [], [], []
+    evaluations = []
     for record in records:
         d = record.data
+        item = {
+            "kind": record.kind,
+            "source": reference(record),
+            "status": "AVAILABLE",
+            "role": "BACKGROUND" if record.kind == "fundamental" else "CONTEXT_GATE",
+            "reasons": [],
+            "inputs": {k: v for k, v in d.items() if k != "source_url"},
+        }
+        evaluations.append(item)
         if record.kind == "catalyst":
             t = datetime.fromisoformat(d["event_time"])
             if not d["verified"] or (now - t).total_seconds() > 86400 * 7:
+                item.update(status="UNVERIFIED" if not d["verified"] else "EXPIRED")
+                item["reasons"] = ["未核实或事件已超过 7 天，不参与支持或否决"]
                 continue
             if d["direction"] == "POSITIVE" and d["confidence"] >= 0.7:
                 supporting.append("已核实催化剂：" + d["title"])
                 groups.append("catalyst")
+                item["reasons"].append("已核实正面催化仅计入融合规则的证据组")
             if d["direction"] == "NEGATIVE":
                 risks.append("负面催化剂：" + d["title"])
+                item.update(status="BLOCKED", reasons=[risks[-1]])
         elif record.kind == "tokenomics":
+            item["reasons"].append("按记录时点检查；尚无 tokenomics 自动过期策略")
+            item["missing_fields"] = [
+                k
+                for k in ("unlock_time", "unlock_pct_circulating", "fdv_usd", "market_cap_usd")
+                if d.get(k) is None
+            ]
+            if item["missing_fields"]:
+                item["status"] = "PARTIAL"
             unlock = datetime.fromisoformat(d["unlock_time"]) if d["unlock_time"] else None
+            before = len(risks)
             if (
                 unlock
                 and 0 <= (unlock - now).total_seconds() <= 86400 * 7
@@ -207,10 +241,18 @@ def asset_context(archive, asset_id, now):
                 risks.append(f"7 日内解锁占流通量 {d['unlock_pct_circulating']:.1f}%")
             if d["fdv_usd"] and d["market_cap_usd"] and d["fdv_usd"] / d["market_cap_usd"] > 10:
                 risks.append("FDV / 流通市值超过 10 倍")
-        elif record.kind == "fundamental" and d["verified"]:
-            supporting.append("基本面有可审计记录；不直接解释短期买盘")
+            if len(risks) > before:
+                item["status"] = "BLOCKED"
+                item["reasons"].extend(risks[before:])
+        elif record.kind == "fundamental":
+            item["status"] = "AVAILABLE" if d["verified"] else "UNVERIFIED"
+            item["reasons"] = ["基本面仅作背景；收入、TVL、用户数未参与短期候选评分"]
+            if d["verified"]:
+                supporting.append("基本面有可审计记录；不直接解释短期买盘")
     for kind in ("catalyst", "tokenomics", "fundamental"):
-        if not any(r.kind == kind for r in records):
+        if not any(
+            r["kind"] == kind and r["status"] not in ("UNVERIFIED", "EXPIRED") for r in evaluations
+        ):
             missing.append(kind)
     return {
         "records": [r.id for r in records],
@@ -218,4 +260,6 @@ def asset_context(archive, asset_id, now):
         "risks": risks,
         "evidence_groups": list(set(groups)),
         "missing": missing,
+        "evaluations": evaluations,
+        "as_of": now.isoformat(),
     }

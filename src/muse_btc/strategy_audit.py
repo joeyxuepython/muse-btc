@@ -24,7 +24,16 @@ BASIC_INPUTS = {
 
 
 def record(
-    trace, snapshot, rule, *, status=None, signal=None, inputs=None, reasons=(), role="RULE"
+    trace,
+    snapshot,
+    rule,
+    *,
+    status=None,
+    signal=None,
+    inputs=None,
+    reasons=(),
+    role="RULE",
+    checks=None,
 ):
     if trace is None:
         return
@@ -46,6 +55,7 @@ def record(
                 else "NOT_TRIGGERED"
             ),
             "inputs": inputs,
+            "checks": checks or {},
             "missing": missing,
             "reasons": list(reasons)
             or (
@@ -84,6 +94,9 @@ def attach_publication(trace, signal, alert, *, cooldown=False, regime=None):
         )
         if alert.get("requested_level") == "STRONG" and alert["level"] != "STRONG":
             row["publication"] = "BLOCKED_CONFIRMATION"
+        elif signal.decision.get("asset_context", {}).get("risks") and signal.kind == "WATCH":
+            row["publication"] = "BLOCKED_CONTEXT"
+            row["publication_reason"] = "；".join(signal.decision["asset_context"]["risks"])
         elif (
             regime
             and regime.risk_mode != "NORMAL"
