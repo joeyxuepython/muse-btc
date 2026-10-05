@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timedelta
 from itertools import groupby
 
@@ -5,7 +6,7 @@ from .btc_intelligence import apply_btc_context
 from .config import Settings
 from .decisions import decide
 from .entry_quality import quality_contexts
-from .models import Module, Outcome, Signal, SignalKind, Snapshot, utc_now
+from .models import Outcome, Signal, SignalKind, Snapshot, utc_now
 from .performance import build_report
 from .rules import RULE_VERSION, market_regime, quote_usable
 from .storage import Store
@@ -25,18 +26,28 @@ def observed_path(history, start, end, settings):
 
 
 def measure_signal(
-    store: Store, signal: Signal, horizon: int, now: datetime, settings: Settings
+    store: Store,
+    signal: Signal,
+    horizon: int,
+    now: datetime,
+    settings: Settings,
+    *,
+    recorded_settings=False,
+    history=None,
 ) -> Outcome | None:
-    recorded = store.decision_config(signal.emitted_at)
-    if recorded:
-        settings = settings.model_copy(update=recorded)
     target = signal.emitted_at + timedelta(seconds=horizon)
     if target > now:
         return None
+    if not recorded_settings:
+        recorded = store.decision_config(signal.emitted_at)
+        if recorded:
+            settings = settings.model_copy(update=recorded)
     tolerance = max(settings.poll_seconds * 2, 60)
     end_limit = min(now, target + timedelta(seconds=tolerance))
     history = observed_path(
-        store.snapshot_range(signal.emitted_at, end_limit, signal.asset_id),
+        history
+        if history is not None
+        else store.quote_range(signal.emitted_at, end_limit, signal.asset_id),
         signal.emitted_at,
         end_limit,
         settings,
@@ -59,7 +70,7 @@ def measure_signal(
     btc_return = None
     baseline = store.snapshot(signal.btc_snapshot_id) if signal.btc_snapshot_id else None
     if baseline and quote_usable(baseline, signal.emitted_at, settings):
-        btc_history = store.snapshot_range(target, end_limit, "binance:BTCUSDT")
+        btc_history = store.quote_range(target, end_limit, "binance:BTCUSDT")
         btc_end = next(
             (
                 s
@@ -103,25 +114,89 @@ def measure_signal(
     )
 
 
-def validate_pending(store: Store, now: datetime, settings: Settings) -> int:
-    completed = {(o.signal_id, o.horizon_seconds) for o in store.outcomes()}
+def validation_batch(store, now, settings, *, limit=None, budget_seconds=None, seed_limit=64):
+    """Bound work between tasks; a missing closed window requires explicit retry.
+
+    The time budget is cooperative, not a promise to interrupt an active SQL query.
+    Completion and deferral are durable, so cancellation/restarts do not lose work.
+    """
+    started = time.monotonic()
+    seeded = store.seed_validation_jobs(seed_limit)
+    jobs = store.due_validation_jobs(now, limit or settings.validation_batch_size)
+    by_signal = {}
+    for job in jobs:
+        by_signal.setdefault(job["signal_id"], []).append(job)
+    result = {
+        "seeded_signals": seeded,
+        "attempted": 0,
+        "completed": 0,
+        "missing": 0,
+        "deferred": 0,
+        "budget_exhausted": False,
+    }
+    for batch in by_signal.values():
+        if budget_seconds is not None and time.monotonic() - started >= budget_seconds:
+            result["budget_exhausted"] = True
+            break
+        signal = Signal.model_validate_json(batch[0]["payload"])
+        recorded = store.decision_config(signal.emitted_at)
+        config = settings.model_copy(update=recorded) if recorded else settings
+        tolerance = max(config.poll_seconds * 2, 60)
+        end = min(
+            now,
+            signal.emitted_at
+            + timedelta(seconds=max(j["horizon_seconds"] for j in batch) + tolerance),
+        )
+        history = store.quote_range(signal.emitted_at, end, signal.asset_id)
+        for job in batch:
+            if (
+                result["attempted"]
+                and budget_seconds is not None
+                and time.monotonic() - started >= budget_seconds
+            ):
+                result["budget_exhausted"] = True
+                break
+            horizon = job["horizon_seconds"]
+            outcome = measure_signal(
+                store, signal, horizon, now, config, recorded_settings=True, history=history
+            )
+            result["attempted"] += 1
+            if outcome:
+                result["completed"] += store.save_outcome(outcome)
+            else:
+                deadline = signal.emitted_at + timedelta(seconds=horizon + tolerance)
+                missing = now >= deadline
+                retry = min(now + timedelta(seconds=config.poll_seconds), deadline)
+                store.defer_validation(signal.id, horizon, now, retry, missing=missing)
+                result["missing" if missing else "deferred"] += 1
+        if result["budget_exhausted"]:
+            break
+    result["elapsed_seconds"] = round(time.monotonic() - started, 3)
+    return result
+
+
+def validate_pending(
+    store: Store, now: datetime, settings: Settings, *, retry_missing=False
+) -> int:
+    # Explicit CLI work can drain the archive; the market collector never calls this.
+    while store.seed_validation_jobs(256):
+        pass
+    if retry_missing:
+        store.retry_missing_validation(now)
     count = 0
-    for signal in store.signals(limit=100000, as_of=now):
-        if signal.module == Module.MEME or signal.kind == SignalKind.INVALIDATED:
-            continue
-        for horizon in HORIZONS:
-            if (signal.id, horizon) not in completed:
-                outcome = measure_signal(store, signal, horizon, now, settings)
-                if outcome:
-                    count += store.save_outcome(outcome)
+    while store.due_validation_jobs(now, 1):
+        result = validation_batch(store, now, settings, limit=256)
+        count += result["completed"]
     return count
 
 
 def validation_report(store: Store, settings: Settings, now: datetime | None = None) -> dict:
     now = now or utc_now()
-    return build_report(
+    report = build_report(
         store.signals(limit=100000, as_of=now), store.outcomes(), HORIZONS, settings, now
     )
+    report["validation_queue"] = store.validation_queue(now)
+    return report
 
 
 def replay(store: Store, start: datetime, end: datetime, settings: Settings) -> dict:

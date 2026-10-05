@@ -31,7 +31,7 @@ from .ranking import rank_assets
 from .rules import market_regime, usable
 from .storage import Store
 from .strategy_audit import attach_publication, record, save_run
-from .validation import validate_pending
+from .validation_worker import ValidationWorker
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,8 @@ class Collector:
         self.settings, self.store, self.providers = settings, store, providers
         self.lock = asyncio.Lock()
         self.task: asyncio.Task | None = None
+        self.validation_task: asyncio.Task | None = None
+        self.validator = ValidationWorker(store, settings)
         self.last_finished_at: datetime | None = None
         self.last_result: dict = {}
         self.phase = "IDLE"
@@ -70,6 +72,7 @@ class Collector:
             if self.lock.locked() and self.started_monotonic is not None
             else None,
             "phase_seconds": dict(self.phase_durations),
+            "validation_worker": dict(self.validator.progress),
         }
 
     def initialise_statuses(self) -> None:
@@ -109,12 +112,16 @@ class Collector:
         await run_sync(self.initialise_statuses)
         if self.settings.enable_collector:
             self.task = asyncio.create_task(self._loop(), name="muse-collector")
+        if self.settings.enable_background_validation:
+            self.validation_task = asyncio.create_task(self.validator.run(), name="muse-validation")
 
     async def stop(self) -> None:
-        if self.task:
-            self.task.cancel()
+        for task in (self.task, self.validation_task):
+            if not task:
+                continue
+            task.cancel()
             try:
-                await self.task
+                await task
             except asyncio.CancelledError:
                 pass
         await self.providers.close()
@@ -240,14 +247,13 @@ class Collector:
             ranking = enrich_rankings(ranking, saved, self.store, now, self.settings)
         self.store.save_rankings(ranking, now)
         signal_count = self._process_signals(saved, regime, now)
-        self.set_phase("VALIDATING")
-        outcomes = validate_pending(self.store, now, self.settings)
         self.last_finished_at = utc_now()
         self.last_result = {
             "status": "COMPLETE" if saved else "NO_DATA",
             "snapshots": len(saved),
             "signals": signal_count,
-            "outcomes": outcomes,
+            "outcomes": 0,
+            "validation_status": "INDEPENDENT_WORKER",
             "finished_at": self.last_finished_at.isoformat(),
         }
 
@@ -269,13 +275,10 @@ class Collector:
         missing_context = set(by_asset) - contexts.keys()
         if self.settings.enable_intelligence and missing_context:
             contexts.update(asset_contexts(IntelligenceStore(self.store), missing_context, now))
-        for old in self.store.signals(limit=100000, as_of=now):
+        for old in self.store.active_signals(now):
             if old.module == Module.MEME:
                 continue
             if old.kind not in (SignalKind.WATCH, SignalKind.ENTRY_CANDIDATE):
-                continue
-            events = self.store.signal_events(old.id)
-            if events and events[-1].state != "ACTIVE":
                 continue
             snapshot = by_asset.get(old.asset_id)
             reason = None

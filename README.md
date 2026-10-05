@@ -14,7 +14,9 @@
 
 [信号决策解释](docs/decision-explanations.md)说明触发规则、风险门控、缺失/过期数据、研究背景与未参与模块的实际用途，以及 Muse 如何采用完整中文正文。
 
-[最新 Muse 指引：策略质量与效果评估](docs/strategy-quality.md)说明连续确认、盘口覆盖、发送前复核、买盘支撑撤销、市场共振研究对照和分版本去重评估。新增 `/api/quality` 与 `muse quality-report`；准确性提升须用云端真实归档验证。
+[策略质量与效果评估](docs/strategy-quality.md)说明连续确认、盘口覆盖、发送前复核、买盘支撑撤销、市场共振研究对照和分版本去重评估。新增 `/api/quality` 与 `muse quality-report`；准确性提升须用云端真实归档验证。
+
+[最新 Muse 指引：采集延迟与历史验证修复](docs/collector-latency.md)说明独立评估队列、数据库时间索引、历史缺失重试、盘口刷新预算和云端验收。历史评估不会再串行阻塞行情采集。
 
 ## 已实现的第一阶段
 

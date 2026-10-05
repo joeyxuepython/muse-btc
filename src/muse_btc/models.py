@@ -213,6 +213,16 @@ class SignalEvent(Record):
     snapshot_id: str | None = None
 
 
+class SnapshotQuote(Record):
+    """Historical price projection; no candles or depth needed for price labels."""
+
+    id: str
+    asset_id: str
+    market_time: AwareDatetime
+    available_at: AwareDatetime
+    price: float = Field(gt=0)
+
+
 class Outcome(Record):
     signal_id: str
     horizon_seconds: int

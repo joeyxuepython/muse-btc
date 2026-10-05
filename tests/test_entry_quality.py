@@ -79,6 +79,60 @@ def test_distinct_complete_observations_confirm_without_unproven_market_gate(sto
     assert signal(store, settings, snap, now).kind == SignalKind.WATCH
 
 
+def test_quality_diagnostics_distinguish_missing_stale_and_real_low_flow(store, settings, now):
+    settings.enable_entry_quality = True
+    first = rich(now)
+    store.save_snapshot(first)
+    quality = quality_contexts(store, now, settings)[first.asset_id]["entry_quality"]
+    assert "CONFIRMATION_OBSERVATIONS_INSUFFICIENT" in quality["failure_codes"]
+    assert "CONFIRMED_FLOW_OR_DEPTH_INSUFFICIENT" not in quality["failure_codes"]
+    stale = quality_contexts(store, now + timedelta(seconds=301), settings)[first.asset_id]
+    assert stale["entry_quality"]["book_age_seconds"] == 301
+    assert "BOOK_STALE_OR_INVALID" in stale["entry_quality"]["failure_codes"]
+    assert stale["market_confirmation"]["eligible_assets"] == 0
+    pair(store, now + timedelta(seconds=600), bid=600, ask=150)
+    latest = rich(now + timedelta(seconds=660), buy=0.3)
+    store.save_snapshot(latest)
+    failed = quality_contexts(store, latest.available_at, settings)[latest.asset_id][
+        "entry_quality"
+    ]
+    assert failed["confirmation_state"] == "CONFIRMED"
+    assert "CONFIRMED_FLOW_OR_DEPTH_INSUFFICIENT" in failed["failure_codes"]
+
+
+def test_market_reports_required_coverage_and_exclusion_causes(store, settings, now):
+    pair(store, now)
+    absent = rich(now, "ABSENTUSDT")
+    absent.component_times.pop("book")
+    store.save_snapshot(absent)
+    store.save_universe(
+        {
+            "selected_at": now.isoformat(),
+            "entries": [
+                {"binance_symbol": symbol, "canonical_asset_id": symbol}
+                for symbol in ["BTCUSDT", "ABSENTUSDT", "MISSINGUSDT"]
+            ],
+        }
+    )
+    market = quality_contexts(store, now, settings)["binance:BTCUSDT"]["market_confirmation"]
+    assert market["required_assets"] == 5
+    assert market["coverage_pct"] == 0
+    assert market["exclusion_reason_counts"] == {"BOOK_NOT_COLLECTED": 1, "MISSING_SNAPSHOT": 1}
+    assert market["status"] == "UNKNOWN" and market["mode"] == "observe"
+
+
+def test_missing_taker_flow_does_not_claim_observed_weak_demand(store, settings, now):
+    pair(store, now)
+    latest = rich(now + timedelta(seconds=60), buy=None)
+    store.save_snapshot(latest)
+    quality = quality_contexts(store, latest.available_at, settings)[latest.asset_id][
+        "entry_quality"
+    ]
+    assert "TAKER_BUY_INPUTS_MISSING" in quality["failure_codes"]
+    assert "CONFIRMED_FLOW_OR_DEPTH_INSUFFICIENT" not in quality["failure_codes"]
+    assert not quality["checks"]["persistent_demand"]
+
+
 @pytest.mark.parametrize(
     "problem", ["cached", "partial_thin", "thin", "chase", "future", "misaligned"]
 )

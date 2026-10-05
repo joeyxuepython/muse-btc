@@ -153,9 +153,16 @@ def runtime_health(store, now):
         and (now - datetime.fromisoformat(worker["heartbeat_at"])).total_seconds() > 120
     ):
         worker = worker | {"status": "STALE"}
+    validator = store.state("validation_worker") or {"status": "NOT_STARTED"}
+    if (
+        validator.get("status") == "RUNNING"
+        and (now - datetime.fromisoformat(validator["heartbeat_at"])).total_seconds() > 120
+    ):
+        validator = validator | {"status": "STALE"}
     market = store.state("market_heartbeat")
     return {
         "worker": worker,
+        "validation_worker": validator,
         "market_heartbeat": market,
         "market_heartbeat_stale": market is None
         or (now - datetime.fromisoformat(market)).total_seconds() > 120,

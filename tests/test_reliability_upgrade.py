@@ -230,9 +230,15 @@ async def test_worker_failure_persists_and_does_not_block_another_job(store, set
     assert worker.running["macro"] is old
 
 
-def test_worker_heartbeat_detects_dead_process(store, now):
-    store.set_state("intelligence_worker", {"status": "RUNNING", "heartbeat_at": now.isoformat()})
-    assert runtime_health(store, now + timedelta(seconds=121))["worker"]["status"] == "STALE"
+@pytest.mark.parametrize(
+    "state_key,report_key",
+    [("intelligence_worker", "worker"), ("validation_worker", "validation_worker")],
+)
+def test_worker_heartbeat_detects_dead_process(store, now, state_key, report_key):
+    store.set_state(state_key, {"status": "RUNNING", "heartbeat_at": now.isoformat()})
+    assert runtime_health(store, now)[report_key]["status"] == "RUNNING"
+    assert runtime_health(store, now + timedelta(seconds=121))[report_key]["status"] == "STALE"
+    assert store.state(state_key)["status"] == "RUNNING"  # Health reports do not mutate history.
 
 
 def test_btc_context_has_missing_values_not_fake_neutral_scores(store, settings, now):

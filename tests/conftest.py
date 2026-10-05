@@ -17,6 +17,7 @@ def settings(tmp_path):
     return Settings(
         database_path=tmp_path / "test.db",
         enable_collector=False,
+        enable_background_validation=False,
         max_altcoins=1,
         max_memes=2,
         # Legacy rule fixtures run in isolation; quality tests enable the new gate explicitly.

@@ -7,7 +7,7 @@ excludes the target; it is not CoinKarma LIQ or a claim about the whole market.
 import hashlib
 import json
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import timedelta
 from statistics import median
 
@@ -131,6 +131,42 @@ def asset_quality(snapshot, history, now, settings):
         and current["imbalance"] > previous["imbalance"]
         and current["bid_usdt"] > previous["bid_usdt"]
     )
+    failures, details = [], []
+    for component, label in (("book", "盘口"), ("candles", "已收盘 K 线")):
+        timestamp = snapshot.component_times.get(component)
+        if timestamp is None:
+            failures.append(component.upper() + "_NOT_COLLECTED")
+            details.append(label + "尚无源时点")
+        elif not component_usable(snapshot, component, now, settings):
+            failures.append(component.upper() + "_STALE_OR_INVALID")
+            details.append(label + "已过期或时点不合法")
+    if not current["fresh_components"] and not details:
+        failures.append("INPUTS_NOT_ALIGNED_OR_USABLE")
+        details.append("报价与组件未对齐或数据质量未通过")
+    if current["bid_usdt"] is None:
+        failures.append("NEAR_DEPTH_MISSING_OR_INVALID")
+        details.append("近端盘口金额缺失或无效")
+    elif not current["depth_floor"]:
+        failures.append("NEAR_DEPTH_BELOW_FLOOR")
+        details.append("已观测双边近端盘口金额低于下限")
+    if not window:
+        failures.append("CONFIRMATION_OBSERVATIONS_INSUFFICIENT")
+        details.append("新鲜度窗口内不足两次不同源时点的有效观测")
+    elif not ready:
+        failures.append("CONFIRMATION_INPUTS_INVALID")
+        details.append("确认窗口包含过期、未对齐或无效输入")
+    elif any(s.features.spot_taker_buy_ratio is None for s in window):
+        failures.append("TAKER_BUY_INPUTS_MISSING")
+        details.append("连续观测中的主动买入占比缺失，无法判断买入支撑")
+    elif not persistent:
+        failures.append("CONFIRMED_FLOW_OR_DEPTH_INSUFFICIENT")
+        details.append("有效连续观测的买入占比或盘口金额未满足要求")
+    if any(v is None for v in returns):
+        failures.append("CHASE_INPUTS_MISSING")
+        details.append("追涨检查所需涨幅缺失")
+    elif not checks["not_extended"]:
+        failures.append("CHASE_LIMIT_EXCEEDED")
+        details.append("短期涨幅超过追涨上限")
     return {
         "version": VERSION,
         "policy_id": hashlib.sha256(
@@ -140,7 +176,20 @@ def asset_quality(snapshot, history, now, settings):
         "as_of": now.isoformat(),
         "status": "PASS" if all(checks.values()) else "WAIT",
         "checks": checks,
-        "reasons": [CHECK_NAMES[k] + "未满足" for k, passed in checks.items() if not passed],
+        "reasons": details,
+        "failure_codes": failures,
+        "confirmation_state": "CONFIRMED"
+        if ready
+        else "INPUTS_INVALID"
+        if window
+        else "INSUFFICIENT_OBSERVATIONS",
+        "book_age_seconds": (now - snapshot.component_times["book"]).total_seconds()
+        if snapshot.component_times.get("book")
+        else None,
+        "candle_age_seconds": (now - snapshot.component_times["candles"]).total_seconds()
+        if snapshot.component_times.get("candles")
+        else None,
+        "maximum_age_seconds": settings.stale_seconds,
         "snapshot_ids": [s.id for s in window] or [snapshot.id],
         "window_start": window[-1].available_at.isoformat() if window else None,
         "book_time": snapshot.component_times.get("book").isoformat()
@@ -213,6 +262,21 @@ def quality_contexts(store, now, settings, snapshots=()):
             if breadth <= 0.3 and imbalance < 0
             else "MIXED"
         )
+        excluded = Counter()
+        for peer in peers - valid.keys():
+            if peer not in qualities:
+                reason = "MISSING_SNAPSHOT"
+            elif latest[peer].component_times.get("book") is None:
+                reason = "BOOK_NOT_COLLECTED"
+            elif not component_usable(latest[peer], "book", now, settings):
+                reason = "BOOK_STALE_OR_INVALID"
+            elif not qualities[peer]["complete_depth_band"]:
+                reason = "INCOMPLETE_DEPTH_BAND"
+            elif qualities[peer]["confirmation_state"] != "CONFIRMED":
+                reason = "UNCONFIRMED_OR_INVALID_OBSERVATIONS"
+            else:
+                reason = "TARGET_OR_PEER_NOT_ALIGNED"
+            excluded[reason] += 1
         market = {
             "version": "market-confirmation-v1",
             "mode": settings.market_confirmation_mode,
@@ -225,6 +289,11 @@ def quality_contexts(store, now, settings, snapshots=()):
             "resonance": state == "SUPPORTIVE" and quality["buy_support_improving"],
             "eligible_assets": count,
             "expected_assets": len(peers),
+            "required_assets": max(
+                settings.market_confirmation_min_assets,
+                math.ceil(len(peers) * settings.market_confirmation_min_coverage),
+            ),
+            "exclusion_reason_counts": dict(excluded),
             "coverage_pct": coverage * 100,
             "support_breadth_pct": breadth * 100 if breadth is not None else None,
             "median_imbalance": imbalance,
