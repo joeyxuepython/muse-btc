@@ -59,6 +59,16 @@ class Settings(BaseSettings):
     risk_notification_max_age_seconds: int = Field(default=300, ge=60, le=3600)
     pre_pump_confirmation_seconds: int = Field(default=300, ge=60, le=900)
     pre_pump_max_chase_pct: float = Field(default=3, gt=0, le=20)
+    enable_entry_quality: bool = True
+    entry_confirmation_seconds: int = Field(default=60, ge=30, le=300)
+    entry_min_depth_usdt: float = Field(default=10000, gt=0)
+    entry_max_chase_pct: float = Field(default=3, gt=0, le=20)
+    market_confirmation_mode: str = Field(default="observe", pattern=r"^(observe|require)$")
+    market_confirmation_min_assets: int = Field(default=5, ge=2, le=100)
+    market_confirmation_min_coverage: float = Field(default=0.7, gt=0, le=1)
+    validation_min_samples: int = Field(default=30, ge=10)
+    # Keep the default request weight; cloud operators can increase after measuring coverage.
+    spot_depth_limit: int = Field(default=100, ge=100, le=1000)
     max_memes: int = Field(default=8, ge=1, le=30)
     meme_chains: list[str] = ["ethereum", "base", "bsc", "solana"]
     meme_watchlist: list[WatchedToken] = []

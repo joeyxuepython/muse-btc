@@ -2,10 +2,14 @@
 
 from copy import deepcopy
 
+from .entry_quality import CHECK_NAMES as QUALITY_CHECK_NAMES
 from .rules import component_usable
 
 VERSION = "decision-explanation-v1"
 CHECK_NAMES = {
+    **{"quality:" + k: v for k, v in QUALITY_CHECK_NAMES.items()},
+    "market_resonance": "本币与覆盖市场买盘共振",
+    "spot_demand_confirmed": "融合规则的实际现货买入确认",
     "momentum": "价格与放量",
     "spot_demand": "现货主动买入",
     "ema_trend": "EMA 趋势",
@@ -15,7 +19,7 @@ CHECK_NAMES = {
     "liquidity": "盘口价差",
     "time_alignment": "现货/衍生品时间对齐",
     "no_competing_signal": "无其他基础规则信号（含挤压观察）",
-    "evidence_groups": "融合证据组数量",
+    "evidence_groups": "市场证据组数量（背景不计）",
     "asset_context": "催化与代币经济风险",
 }
 DIMENSION_NAMES = {
@@ -157,7 +161,14 @@ def explain(signal, snapshot, regime, trace, context, now, settings):
     for item in context.get("evaluations", []):
         if item["kind"] == "fundamental":
             background.append({"id": "fundamental", "name": "基本面", **deepcopy(item)})
-    summaries = {"patterns", "evidence_groups", "funding_ready", "liquid", "btc_risk_mode"}
+    summaries = {
+        "patterns",
+        "evidence_groups",
+        "market_evidence_groups",
+        "funding_ready",
+        "liquid",
+        "btc_risk_mode",
+    }
     inputs = {
         f"{r['rule_id']}:{k}": v
         for r in relevant
@@ -277,6 +288,28 @@ def explanation_lines(rows):
             add(f"{row['rule_id']} 被限制：" + "、".join(blocked) + "。")
         if unknown:
             add("未全面核实：" + "、".join(unknown) + "；没有已知阻断不能视作完整通过。")
+        quality = d.get("entry_quality", {})
+        if quality.get("enabled"):
+            add(
+                "入场质量："
+                + quality["status"]
+                + f"；往返成本假设 {quality['round_trip_cost_bps']:g} bps"
+                + f"；短期追涨上限 {quality['max_chase_pct']:g}%。"
+            )
+        market = d.get("market_confirmation", {})
+        if market:
+            breadth = market.get("support_breadth_pct")
+            add(
+                "市场买盘确认："
+                + market["status"]
+                + f"；有效覆盖 {market['eligible_assets']}/{market['expected_assets']} 个其他币种"
+                + (f"，买盘改善占比 {breadth:.0f}%" if breadth is not None else "")
+                + (
+                    "；当前用于研究对照。"
+                    if market["mode"] == "observe"
+                    else "；当前参与入场门控。"
+                )
+            )
         for item in d.get("asset_context", {}).get("evaluations", []):
             if item["kind"] == "tokenomics":
                 add("代币经济检查使用已录入观测；尚无自动过期策略，记录时点见决策详情。")

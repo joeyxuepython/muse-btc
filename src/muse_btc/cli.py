@@ -10,6 +10,7 @@ from .async_io import run_sync
 from .btc_data import BTCDataEngine
 from .config import Settings
 from .context import import_context
+from .entry_quality import quality_contexts
 from .events import EventEngine
 from .experiments import ranking_report, train_model
 from .intelligence import ContextInput, IntelligenceStore
@@ -78,6 +79,7 @@ def main() -> None:
     serve.add_argument("--port", type=int, default=8000)
     sub.add_parser("collect", help="执行一轮真实公开数据采集")
     sub.add_parser("validate", help="计算已到期提醒的前瞻表现")
+    sub.add_parser("quality-report", help="只读取归档，检查入场质量和市场买盘覆盖")
     backtest = sub.add_parser("replay", help="对真实归档快照进行时间点重放")
     backtest.add_argument("--start", required=True, type=parse_time)
     backtest.add_argument("--end", required=True, type=parse_time)
@@ -158,6 +160,10 @@ def main() -> None:
     elif args.command == "validate":
         validate_pending(store, utc_now(), settings)
         print(json.dumps(validation_report(store, settings), ensure_ascii=False, indent=2))
+    elif args.command == "quality-report":
+        print(
+            json.dumps(quality_contexts(store, utc_now(), settings), ensure_ascii=False, indent=2)
+        )
     elif args.command == "replay":
         print(
             json.dumps(replay(store, args.start, args.end, settings), ensure_ascii=False, indent=2)

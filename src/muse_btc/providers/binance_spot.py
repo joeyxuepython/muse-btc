@@ -165,7 +165,9 @@ class BinanceSpotProvider:
             )
             values = await asyncio.gather(
                 self.get("/api/v3/klines", {"symbol": symbol, "interval": "1m", "limit": 180}),
-                self.get("/api/v3/depth", {"symbol": symbol, "limit": 100}),
+                self.get(
+                    "/api/v3/depth", {"symbol": symbol, "limit": self.settings.spot_depth_limit}
+                ),
                 self.get("/api/v3/aggTrades", {"symbol": symbol, "limit": 100}),
                 return_exceptions=True,
             )

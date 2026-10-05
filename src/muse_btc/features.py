@@ -28,6 +28,14 @@ def candle_features(candles: list[Candle], as_of: datetime) -> tuple[Features, l
     if len({c.open_time for c in closed}) != len(closed):
         issues.append("DUPLICATE_CANDLES")
     if any(
+        c.close_time <= c.open_time
+        or c.low > min(c.open, c.close)
+        or c.high < max(c.open, c.close)
+        or c.taker_buy_quote_volume > c.quote_volume
+        for c in closed
+    ):
+        issues.append("INVALID_CANDLE_VALUES")
+    if any(
         (right.open_time - left.open_time).total_seconds() != 60
         for left, right in zip(closed, closed[1:], strict=False)
     ):
@@ -82,11 +90,14 @@ def depth_features(book: dict, features: Features) -> None:
     asks = [(float(price), float(qty)) for price, qty in (row[:2] for row in book.get("asks", []))]
     if any(not math.isfinite(p) or not math.isfinite(q) or p <= 0 or q < 0 for p, q in bids + asks):
         raise ValueError("Invalid order book price or quantity")
+    bids, asks = ([(p, q) for p, q in side if q > 0] for side in (bids, asks))
     if not bids or not asks:
-        return
+        raise ValueError("Empty order book")
+    if len({p for p, _ in bids}) != len(bids) or len({p for p, _ in asks}) != len(asks):
+        raise ValueError("Duplicate order book levels")
     best_bid, best_ask = max(p for p, _ in bids), min(p for p, _ in asks)
-    if best_bid <= 0 or best_ask < best_bid:
-        return
+    if best_ask <= best_bid:
+        raise ValueError("Crossed or locked order book")
     mid = (best_bid + best_ask) / 2
     features.spread_bps = (best_ask - best_bid) / mid * 10000
     bid_depth = sum(price * qty for price, qty in bids if price >= mid * 0.99)
@@ -95,7 +106,7 @@ def depth_features(book: dict, features: Features) -> None:
     features.ask_depth_1pct_usd = ask_depth
     total = bid_depth + ask_depth
     features.depth_imbalance = (bid_depth - ask_depth) / total if total > 0 else None
-    for band in (0.5, 1, 2, 5):
+    for band in (0.1, 0.5, 1, 2, 5):
         fraction = band / 100
         bid = sum(p * q for p, q in bids if p >= mid * (1 - fraction))
         ask = sum(p * q for p, q in asks if p <= mid * (1 + fraction))

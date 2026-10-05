@@ -413,12 +413,16 @@ class Store:
             ).fetchall()
         return [SignalEvent.model_validate_json(row[0]) for row in rows]
 
-    def last_signal_time(self, asset_id: str, rule_id: str, kind: str) -> datetime | None:
+    def last_signal_time(
+        self, asset_id: str, rule_id: str, kind: str, *, rule_version: str | None = None
+    ) -> datetime | None:
+        query = "SELECT MAX(emitted_at) FROM signals WHERE asset_id=? AND rule_id=? AND kind=?"
+        args = [asset_id, rule_id, kind]
+        if rule_version is not None:
+            query += " AND json_extract(payload,'$.rule_version')=?"
+            args.append(rule_version)
         with self.connect() as db:
-            row = db.execute(
-                "SELECT MAX(emitted_at) FROM signals WHERE asset_id=? AND rule_id=? AND kind=?",
-                (asset_id, rule_id, kind),
-            ).fetchone()
+            row = db.execute(query, args).fetchone()
         return datetime.fromisoformat(row[0]) if row and row[0] else None
 
     def save_outcome(self, outcome: Outcome) -> bool:

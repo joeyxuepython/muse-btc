@@ -330,8 +330,19 @@ async function showSignal(id) {
 async function loadValidation() {
   try {
     const r = await (await api("/api/validation")).json();
+    const probability = n => n == null ? "—" : `${(n * 100).toFixed(1)}%`;
     $("#validation-body").innerHTML =
-      `<div class="validation-summary"><div><strong>${r.signal_count}</strong><small>归档提醒</small></div><div><strong>${r.outcome_count}</strong><small>已测量时间窗</small></div></div>${r.rules.length ? `<div class="table-scroll"><table><thead><tr><th>规则</th><th>时间窗</th><th>测量 / 覆盖样本</th><th>平均价格变化</th><th>平均不利变化</th></tr></thead><tbody>${r.rules.map((row) => `<tr><td>${escapeHtml(row.rule_id)}</td><td>${row.horizon_seconds / 60}m</td><td>${row.measured_count} / ${row.covered_count}</td><td>${pct(row.mean_return_pct)}</td><td>${pct(row.mean_max_adverse_pct)}</td></tr>`).join("")}</tbody></table></div>` : "<p>尚无已完成的前瞻观察。系统将在 15m、1h、4h、24h、3d、7d、14d、30d 时间窗积累真实结果。</p>"}<ul>${r.limitations.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>`;
+      `<div class="validation-summary"><div><strong>${r.signal_count}</strong><small>归档提醒</small></div><div><strong>${r.outcome_count}</strong><small>已测量时间窗</small></div></div>
+      <p>按规则版本、信号类型和模块分别评估。同币重叠窗口只取最早信号；以下是固定期限的事后观察。</p>
+      ${r.rules.length ? `<div class="table-scroll"><table><thead><tr><th>规则 / 版本</th><th>类型 / 模块</th><th>时间窗</th><th>测量 / 覆盖 / 去重</th><th>待到期 / 缺失 / 断档</th><th>平均价格变化</th><th>扣成本 / 双倍成本</th><th>正收益占比 / 95%区间</th><th>样本状态</th></tr></thead><tbody>${r.rules.map(row => `<tr>
+        <td>${escapeHtml(row.rule_id)}<small>${escapeHtml(row.rule_version || "旧版本")}</small></td>
+        <td>${escapeHtml(kinds[row.signal_kind] || row.signal_kind || "未知")} / ${escapeHtml(row.module || "未知")}</td>
+        <td>${row.horizon_seconds / 60}m</td><td>${row.measured_count} / ${row.covered_count} / ${row.nonoverlapping_count ?? "—"}</td>
+        <td>${row.pending_count ?? 0} / ${row.missing_outcome_count ?? 0} / ${row.gapped_count ?? 0}</td>
+        <td>${pct(row.mean_return_pct)}</td><td>${pct(row.mean_paper_net_return_pct)} / ${pct(row.mean_double_cost_return_pct)}</td>
+        <td>${probability(row.paper_positive_rate)}<small>${row.paper_positive_rate_wilson_95?.map(probability).join(" — ") || "—"}</small></td>
+        <td>${row.evaluation_status === "INSUFFICIENT_SAMPLES" ? "样本不足" : "仅描述统计"}</td></tr>`).join("")}</tbody></table></div>` : "<p>尚无真实信号样本，无法评估策略准确性。</p>"}
+      <ul>${r.limitations.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>`;
   } catch (e) {
     notice(e.message);
   }
@@ -554,6 +565,8 @@ function decisionDetail(d, currentContext) {
     <p>本规则与已匹配子模式输入覆盖 ${d.coverage?.usable_inputs ?? 0}/${d.coverage?.required_inputs ?? 0}；不是胜率或独立策略票数。</p>
     <h3>通过、限制与未知</h3>${list((d.gates || []).map(g => `${g.name}：${status(g.status)} ${(g.reasons || []).join("；")}`))}
     <p>BTC ${escapeHtml(d.btc_regime?.risk_mode || "未知")} · 宏观 ${escapeHtml(d.btc_regime?.macro || "未知")} · BTC 快照 ${escapeHtml(d.btc_regime?.snapshot_id || "未记录")}</p>
+    ${d.entry_quality ? `<h3>入场质量</h3><p>${d.entry_quality.enabled ? escapeHtml(d.entry_quality.status) : "未启用"} · 双边近端深度下限 ${format(d.entry_quality.minimum_depth_usdt, 0)} USDT · 往返成本假设 ${format(d.entry_quality.round_trip_cost_bps)} bps</p>${list(d.entry_quality.reasons || [])}` : ""}
+    ${d.market_confirmation ? `<h3>市场买盘确认</h3><p>${escapeHtml(d.market_confirmation.status)} · 其他币种有效覆盖 ${d.market_confirmation.eligible_assets}/${d.market_confirmation.expected_assets} · 买盘改善占比 ${format(d.market_confirmation.support_breadth_pct)}% · ${d.market_confirmation.mode === "observe" ? "研究对照" : "参与入场门控"}</p>${list(d.market_confirmation.limitations || [])}` : ""}
     <h3>缺失或不可用数据</h3>${list((d.data_gaps || []).map(g => `${g.scope === "OTHER_RULE" ? "其他规则" : g.scope === "THIS_RULE" ? "本规则" : "背景"} · ${g.rule_id || ""} ${g.field}：${status(g.status)}${g.market_time ? " · " + time(g.market_time) : ""}`))}${!d.data_gaps?.length ? "<p>本轮记录未标记缺项。</p>" : ""}
     <h3>资产背景</h3>${list(d.asset_context?.risks || [])}${(d.asset_context?.evaluations || []).map(r => `<p>${escapeHtml(r.kind)}：${escapeHtml(status(r.status))} · ${escapeHtml(status(r.role))}</p><p>${inputs(r)}</p>${refs(r)}${list(r.reasons || [])}`).join("")}
     ${currentContext?.risks?.length ? `<h3>当前发送检查 · ${time(currentContext.as_of)}</h3>${list(currentContext.risks)}<p>当前已暂停发送；上方保留候选产生时的证据。</p>` : ""}

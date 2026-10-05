@@ -1,15 +1,27 @@
-import statistics
 from datetime import datetime, timedelta
 from itertools import groupby
 
 from .btc_intelligence import apply_btc_context
 from .config import Settings
 from .decisions import decide
-from .models import Module, Outcome, Signal, SignalKind, Snapshot
+from .entry_quality import quality_contexts
+from .models import Module, Outcome, Signal, SignalKind, Snapshot, utc_now
+from .performance import build_report
 from .rules import RULE_VERSION, market_regime, quote_usable
 from .storage import Store
 
 HORIZONS = (300, 900, 3600, 14400, 86400, 259200, 604800, 1209600, 2592000)
+
+
+def observed_path(history, start, end, settings):
+    """Order by quote time; repeated or delayed copies are not new observations."""
+    by_time = {}
+    for snapshot in sorted(history, key=lambda s: s.available_at):
+        if start < snapshot.market_time <= end and quote_usable(
+            snapshot, snapshot.available_at, settings
+        ):
+            by_time.setdefault(snapshot.market_time, snapshot)
+    return [by_time[t] for t in sorted(by_time)]
 
 
 def measure_signal(
@@ -23,15 +35,20 @@ def measure_signal(
         return None
     tolerance = max(settings.poll_seconds * 2, 60)
     end_limit = min(now, target + timedelta(seconds=tolerance))
-    history = [
-        s
-        for s in store.snapshot_range(signal.emitted_at, end_limit, signal.asset_id)
-        if s.market_time > signal.emitted_at and quote_usable(s, s.available_at, settings)
-    ]
+    history = observed_path(
+        store.snapshot_range(signal.emitted_at, end_limit, signal.asset_id),
+        signal.emitted_at,
+        end_limit,
+        settings,
+    )
     end = next((s for s in history if s.market_time >= target), None)
     if end is None:
         return None
-    measured = [s for s in history if s.available_at <= end.available_at]
+    measured = [
+        s
+        for s in history
+        if s.available_at <= end.available_at and s.market_time <= end.market_time
+    ]
     prices = [signal.reference_price] + [s.price for s in measured]
     returns = [(price / signal.reference_price - 1) * 100 for price in prices]
     stamps = [signal.emitted_at] + [s.market_time for s in measured]
@@ -41,13 +58,16 @@ def measure_signal(
     )
     btc_return = None
     baseline = store.snapshot(signal.btc_snapshot_id) if signal.btc_snapshot_id else None
-    if baseline and baseline.available_at <= signal.emitted_at:
+    if baseline and quote_usable(baseline, signal.emitted_at, settings):
         btc_history = store.snapshot_range(target, end_limit, "binance:BTCUSDT")
         btc_end = next(
             (
                 s
                 for s in btc_history
-                if s.market_time >= target and quote_usable(s, s.available_at, settings)
+                if abs((s.market_time - end.market_time).total_seconds())
+                <= settings.time_alignment_seconds
+                and s.market_time >= target
+                and quote_usable(s, s.available_at, settings)
             ),
             None,
         )
@@ -72,6 +92,8 @@ def measure_signal(
         round_trip_cost_bps=cost,
         sample_count=len(measured),
         max_observation_gap_seconds=max_gap,
+        max_allowed_gap_seconds=settings.stale_seconds,
+        label_available_at=end.available_at,
         time_to_mfe_seconds=(
             stamps[returns.index(max(returns))] - signal.emitted_at
         ).total_seconds(),
@@ -95,60 +117,18 @@ def validate_pending(store: Store, now: datetime, settings: Settings) -> int:
     return count
 
 
-def validation_report(store: Store, settings: Settings) -> dict:
-    signals = store.signals(limit=100000)
-    by_id = {s.id: s for s in signals}
-    outcomes = store.outcomes()
-    groups: dict[tuple[str, int], list[Outcome]] = {}
-    for outcome in outcomes:
-        signal = by_id.get(outcome.signal_id)
-        if signal:
-            groups.setdefault((signal.rule_id, outcome.horizon_seconds), []).append(outcome)
-    rows = []
-    for (rule_id, horizon), samples in sorted(groups.items()):
-        covered = [o for o in samples if o.max_observation_gap_seconds <= settings.stale_seconds]
-        rows.append(
-            {
-                "rule_id": rule_id,
-                "horizon_seconds": horizon,
-                "measured_count": len(samples),
-                "covered_count": len(covered),
-                "mean_return_pct": statistics.mean(o.return_pct for o in covered)
-                if covered
-                else None,
-                "mean_max_adverse_pct": statistics.mean(o.max_adverse_pct for o in covered)
-                if covered
-                else None,
-                "paper_positive_rate": statistics.mean(
-                    o.paper_net_return_pct > 0
-                    for o in covered
-                    if o.paper_net_return_pct is not None
-                )
-                if any(o.paper_net_return_pct is not None for o in covered)
-                else None,
-            }
-        )
-    return {
-        "validation_status": "OBSERVATION_ONLY",
-        "signal_count": len(signals),
-        "outcome_count": len(outcomes),
-        "horizons_seconds": HORIZONS,
-        "rules": rows,
-        "limitations": [
-            "仅验证真实归档观察，采集之前的盘口和链上状态不能重建",
-            "MFE/MAE 为采样价格的波动，可能遗漏两次采样之间的极值",
-            "纸面成本为固定估计，不代表实际成交或可成交数量",
-            "规则尚未通过充分样本的样本外验证；没有自动升级为核心信号",
-            "退出／风险提醒的价格变化不是做空收益；同币种提醒可能相关",
-        ],
-    }
+def validation_report(store: Store, settings: Settings, now: datetime | None = None) -> dict:
+    now = now or utc_now()
+    return build_report(
+        store.signals(limit=100000, as_of=now), store.outcomes(), HORIZONS, settings, now
+    )
 
 
 def replay(store: Store, start: datetime, end: datetime, settings: Settings) -> dict:
     if end <= start:
         raise ValueError("Replay end must be after start")
     latest: dict[str, Snapshot] = {s.asset_id: s for s in store.latest_snapshots(start)}
-    cooldowns: dict[tuple[str, str, str], datetime] = {}
+    cooldowns: dict[tuple[str, str, str, str], datetime] = {}
     signals: list[Signal] = []
     skipped = 0
     legacy_config_batches = 0
@@ -180,9 +160,12 @@ def replay(store: Store, start: datetime, end: datetime, settings: Settings) -> 
         regime = market_regime(latest.get("binance:BTCUSDT"), as_of, config)
         if config.enable_intelligence:
             regime = apply_btc_context(regime, store, config, as_of, latest.get("binance:BTCUSDT"))
+        qualities = quality_contexts(store, as_of, config, batch)
         for snapshot in batch:
-            for signal in decide(snapshot, regime, as_of, config, store):
-                key = (signal.asset_id, signal.rule_id, signal.kind)
+            for signal in decide(
+                snapshot, regime, as_of, config, store, quality=qualities.get(snapshot.asset_id)
+            ):
+                key = (signal.asset_id, signal.rule_id, signal.kind, signal.rule_version)
                 previous = cooldowns.get(key)
                 if previous and (as_of - previous).total_seconds() < config.alert_cooldown_seconds:
                     continue
