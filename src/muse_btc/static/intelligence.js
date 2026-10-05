@@ -54,6 +54,9 @@ function renderIntelligence() {
       const labels = {spot_demand:"现货需求",leverage_risk:"杠杆风险",macro_liquidity:"宏观流动性",etf_flow:"ETF 资金流",stablecoin_supply:"稳定币供应",onchain_valuation_percentile:"链上估值分位数",options_iv:"期权波动率",research_bias:"研究观点"};
       html += `<h3>BTC 综合研判</h3><p>证据覆盖 ${format(assessment.coverage_pct)}% · 宏观背景 ${escapeHtml(assessment.macro_risk)} · 分数为规则描述，置信度尚未校准。</p>`;
       html += intelTable(["维度", "分值 / 状态", "依据"], Object.entries(assessment.dimensions).map(([k,v]) => [escapeHtml(labels[k] || k), `${format(v.score)} / ${escapeHtml(v.status)}`, escapeHtml(v.evidence.join("；"))]));
+      html += '<h3>待验证的 BTC 上下文观察</h3><p>满足条件只归档 WATCH，随后按各观察期限验证 BTC 表现。阈值未校准，未达 STRONG 推送级别。</p>' + intelTable(["观察", "状态 / 期限", "输入", "来源 / 局限"], (assessment.observations || []).map(r => [
+        escapeHtml(r.title), `${escapeHtml(r.status)} / ${format(r.horizon_seconds / 3600,0)}h`, escapeHtml(JSON.stringify(r.inputs)),
+        `${r.sources.map(s => `${escapeHtml(s.source)} · 观察 ${time(s.market_time)} · 可用 ${time(s.available_at)} ${sourceLink(s.source_url)}`).join("<br>")}<small>${escapeHtml(r.limitations.join("；"))}</small>`]));
     }
     html += '<h3>BTC 链上</h3>' + intelTable(["指标 / 来源", "最新值 / 单位", "观察日期", "状态 / 历史点数"], b.onchain.map(r => [
       `${escapeHtml(r.metric)}<small>${escapeHtml(r.source)}</small>${sourceLink(r.source_url)}`,
@@ -74,6 +77,16 @@ function renderIntelligence() {
     html += '<h3>来源检查</h3>' + intelTable(["来源 / 指标", "结果", "时间 / 原因"], b.checks.map(r => [
       `${escapeHtml(r.source)} / ${escapeHtml(r.metric || "liquidations")}`, `${escapeHtml(r.status)} ${escapeHtml(r.data_status || "")}`, `${time(r.checked_at)}<small>${escapeHtml(r.reason || r.error || (r.errors || []).map(e => `${e.instrument}: ${e.reason}`).join("；"))}</small>`]));
     html += `<p>${escapeHtml(b.limitations.join("；"))}</p><p>宏观、稳定币和 ETF 结果在“宏观与资金流”查看。</p>`;
+  } else if (intelligenceTab === "strategies") {
+    const s = d.strategies, run = s.last_run;
+    const labels = {DISABLED:"未启用", NOT_APPLICABLE:"不适用", MISSING_DATA:"缺少必要数据", NOT_TRIGGERED:"已评估，未触发", MATCHED:"子模式匹配", TRIGGERED_WATCH:"触发观察", TRIGGERED_ENTRY_CANDIDATE:"触发候选", TRIGGERED_RISK:"触发风险", TRIGGERED_INVALIDATED:"原信号失效", NOT_EVALUATED_IN_CURRENT_BATCH:"本轮未评估", BLOCKED_CONFIRMATION:"确认保护拦截", BLOCKED_RISK:"BTC 风险门控拦截", AWAITING_RECEIPT:"等待 Muse 回执", BELOW_DELIVERY_LEVEL:"未达推送级别", NOT_QUEUED:"未排队", SENT:"Muse 报告已发送", FAILED:"Muse 报告失败", SKIPPED:"Muse 报告跳过", COOLDOWN:"冷却期"};
+    html = `<p>最近批次 ${time(run?.as_of)} · 已评估资产 ${run?.assets_evaluated ?? 0} · 融合规则 ${s.fusion_enabled ? "已启用" : "未启用"} · BTC 上下文观察 ${s.research_observations_enabled ? "已启用" : "未启用"}</p>`;
+    html += intelTable(["规则 / 子模式", "本轮结果数量"], Object.entries(run?.rules || {}).map(([k,v]) => [escapeHtml(k), escapeHtml(Object.entries(v).map(([status,n]) => `${labels[status] || status}: ${n}`).join("；"))]));
+    html += '<h3>逐资产最近一次评估</h3>' + intelTable(["资产 / 规则", "评估 / 时间", "发布 / 发送", "缺失 / 原因 / 输入"], s.evaluations.map(r => [
+      `${escapeHtml(r.symbol)}<small>${escapeHtml(r.rule_id)} · ${escapeHtml(r.role)}</small>`, `${escapeHtml(labels[r.status] || r.status)}<small>${time(r.as_of)}</small>`,
+      `${escapeHtml(labels[r.publication] || r.publication)} / ${escapeHtml(labels[r.delivery] || r.delivery)}${r.cooldown ? '<small>冷却期沿用活跃预警</small>' : ""}`,
+      `<small>${escapeHtml(r.missing.join("、"))}</small>${escapeHtml([...(r.reasons || []), r.publication_reason].filter(Boolean).join("；"))}<details><summary>检查输入与关联记录</summary><pre>${escapeHtml(JSON.stringify({inputs:r.inputs,snapshot_id:r.snapshot_id,signal_id:r.signal_id,notification_id:r.notification_id},null,2))}</pre></details>`]));
+    html += `<p>${escapeHtml(s.limitations.join("；"))}</p>`;
   } else if (intelligenceTab === "meme") {
     html = `<p>独立发现池不占 100 币名额。采集开关：${d.meme_collection_enabled ? "已启用" : "未启用"}。公开 profile 覆盖有限，未知风险不视为安全。</p><button class="button primary" data-intel-action="meme">采集一批发现池</button>`;
     html += intelTable(["资产 / 合约", "发现评分", "Rug 风险", "流动性", "首次发现 / 涨幅"], d.meme.tokens.map(r => [

@@ -54,7 +54,9 @@ class Settings(BaseSettings):
     }
     time_alignment_seconds: int = Field(default=120, ge=1, le=300)
     statistics_stale_seconds: int = Field(default=600, ge=300, le=1800)
+    # Compatibility only: numeric score changes do not trigger new notifications.
     alert_score_delta: float = Field(default=10, ge=1, le=100)
+    risk_notification_max_age_seconds: int = Field(default=300, ge=60, le=3600)
     pre_pump_confirmation_seconds: int = Field(default=300, ge=60, le=900)
     pre_pump_max_chase_pct: float = Field(default=3, gt=0, le=20)
     max_memes: int = Field(default=8, ge=1, le=30)
@@ -81,6 +83,9 @@ class Settings(BaseSettings):
     slippage_bps_each_way: float = Field(default=5, ge=0)
     # Application collection is opt-in; these switches never create a Codex scheduled task.
     enable_intelligence: bool = True
+    enable_context_observations: bool = True
+    context_mvrv_percentile: float = Field(default=90, ge=50, le=100)
+    context_options_iv_pct: float = Field(default=80, gt=0, le=300)
     enable_meme_discovery: bool = False
     enable_social: bool = False
     macro_series: list[str] = [

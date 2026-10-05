@@ -1,7 +1,7 @@
 import asyncio
 import secrets
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -10,12 +10,21 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import AwareDatetime, BaseModel, Field
 
-from .alerts import alert_view, change_alert, pre_pump_delivery_status
+from .alerts import (
+    DELIVERY_POLICY_VERSION,
+    alert_view,
+    change_alert,
+    market_risk_status,
+    notification_projections,
+    pre_pump_delivery_status,
+    public_scores,
+)
 from .async_io import run_sync
 from .btc_data import BTCDataEngine
 from .btc_intelligence import apply_btc_context, btc_assessment
 from .config import Settings
 from .context import import_context
+from .delivery import build_deliveries, notification_message
 from .events import EventEngine
 from .experiments import paid_evaluation, ranking_report, train_model
 from .intelligence import ContextInput, IntelligenceStore
@@ -28,6 +37,7 @@ from .rules import market_regime, quote_usable, usable
 from .service import Collector, signal_view
 from .social import SocialEngine
 from .storage import Store
+from .strategy_audit import report as strategy_report
 from .validation import validation_report
 from .worker import IntelligenceWorker, runtime_health
 
@@ -51,6 +61,13 @@ class TrainRequest(BaseModel):
 class FreeDataRequest(BaseModel):
     scope: Literal["all", "onchain", "options", "macro", "liquidations"] = "all"
     liquidation_seconds: int = Field(default=10, ge=1, le=60)
+
+
+class NotificationReceipt(BaseModel):
+    notification_ids: list[str] = Field(min_length=1, max_length=500)
+    status: Literal["SENT", "FAILED", "SKIPPED"]
+    message_id: str | None = Field(default=None, max_length=300)
+    reason: str | None = Field(default=None, max_length=1000)
 
 
 def create_app(settings: Settings | None = None, providers_factory=Providers) -> FastAPI:
@@ -98,7 +115,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             # One BTC assessment per request, independent of the number of alerts.
             regime = current_regime(latest.get("binance:BTCUSDT"), now)
         results = []
-        for alert in alerts:
+        for alert in notification_projections(store, alerts, now):
             result = alert_view(alert, now)
             snapshot = snapshots.get(alert["snapshot_id"])
             current = latest.get(alert["asset_id"])
@@ -114,6 +131,26 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
                 current.market_time.isoformat() if current else None
             )
             result["current_quote_fresh"] = fresh
+            result["current_risk_status"] = (
+                market_risk_status(alert, current, now, config)
+                if alert["notification_class"] == "MARKET_RISK"
+                else None
+            )
+            if alert["notification_class"] in ("MARKET_RISK", "CANCELLATION"):
+                result["data_current"] &= bool(current and usable(current, now, config))
+            result["current_risk_inputs"] = (
+                {
+                    k: getattr(current.features, k)
+                    for k in (
+                        "return_15m_pct",
+                        "spot_taker_buy_ratio",
+                        "funding_rate_pct",
+                        "oi_change_5m_pct",
+                    )
+                }
+                if current and result["data_current"]
+                else {}
+            )
             price = alert.get("notification_price")
             result["price_change_since_notification_pct"] = (
                 round((current.price / price - 1) * 100, 6) if fresh and price else None
@@ -123,11 +160,47 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
                 if alert["level"] == "STRONG" and alert["rule_id"] == "pre-pump-fusion"
                 else None
             )
+            if (
+                alert["level"] == "STRONG"
+                and fresh
+                and alert.get("invalidation_price")
+                and current.price < alert["invalidation_price"]
+            ):
+                result["delivery_guard"] = "SKIP_INVALIDATION_REACHED"
             if result["state"] == "ACTIVE" and (
-                not result["data_current"] or result["delivery_guard"] not in (None, "READY")
+                not result["data_current"]
+                or result["delivery_guard"] not in (None, "READY")
+                or result["current_risk_status"] not in (None, "READY")
+                or result.get("cancellation_delivery_status") not in (None, "READY")
             ):
                 result["state"] = "PAUSED"
                 result["unread"] = False
+            deadline = datetime.fromisoformat(
+                alert.get("notification_expires_at", alert["expires_at"])
+            )
+            if alert["notification_class"] in ("MARKET_RISK", "CANCELLATION"):
+                deadline = min(
+                    deadline,
+                    datetime.fromisoformat(alert.get("notification_at", alert["first_seen"]))
+                    + timedelta(seconds=config.risk_notification_max_age_seconds),
+                )
+            result["notification_eligible"] = bool(
+                result["state"] == "ACTIVE"
+                and deadline > now
+                and alert["notification_class"] != "ARCHIVE"
+                and alert.get("notification_id")
+                and alert.get("price_provenance") != "LEGACY_UNKNOWN"
+            )
+            category = {
+                "OPPORTUNITY": "LONG",
+                "MARKET_RISK": "RISK",
+                "CANCELLATION": "CANCELLATION",
+            }.get(alert["notification_class"])
+            result["message_zh"] = (
+                notification_message([result], category)
+                if category and result["notification_eligible"]
+                else None
+            )
             results.append(result)
         return results
 
@@ -193,6 +266,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             "scope": "PROCESS_LIVENESS",
             "collector": collector.progress(),
             "version": "0.2.0",
+            "delivery_policy_version": DELIVERY_POLICY_VERSION,
             "collector_running": bool(collector.task and not collector.task.done()),
         }
 
@@ -366,14 +440,21 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
         latest_alerts = store.alerts_by_ids([a["id"] for a in page["items"]])
+        page["items"] = notification_projections(
+            store, [public_scores(a) for a in page["items"]], now
+        )
+        receipts = store.notification_receipts([a["notification_id"] for a in page["items"]])
         current = {a["id"]: a for a in alert_responses(list(latest_alerts.values()), now)}
         for item in page["items"]:
+            item["receipt"] = receipts.get(item["notification_id"], {})
             live = current.get(item["id"])
             item["current_alert_state"] = live["state"] if live else "MISSING"
             item["current_level"] = live["level"] if live else None
             item["current_price"] = live["current_price"] if live else None
             item["current_price_market_time"] = live["current_price_market_time"] if live else None
             item["data_current"] = bool(live and live["data_current"])
+            item["current_quote_fresh"] = bool(live and live["current_quote_fresh"])
+            item["current_risk_inputs"] = live.get("current_risk_inputs", {}) if live else {}
             price = item.get("notification_price")
             gain = (
                 round((item["current_price"] / price - 1) * 100, 6)
@@ -385,6 +466,13 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
                 0, (now - datetime.fromisoformat(item["notification_at"])).total_seconds()
             )
             deadline = item.get("notification_expires_at", item["expires_at"])
+            if item["notification_class"] in ("MARKET_RISK", "CANCELLATION"):
+                deadline = min(
+                    datetime.fromisoformat(deadline),
+                    datetime.fromisoformat(item["notification_at"])
+                    + timedelta(seconds=config.risk_notification_max_age_seconds),
+                ).isoformat()
+                item["notification_expires_at"] = deadline
             status = "READY"
             if not live:
                 status = "SKIP_MISSING"
@@ -398,13 +486,45 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
                 status = "SKIP_EXPIRED"
             elif item.get("price_provenance") == "LEGACY_UNKNOWN":
                 status = "LEGACY_REVIEW_REQUIRED"
-            elif item["level"] == "STRONG" and not item["data_current"]:
+            elif item["notification_class"] == "ARCHIVE":
+                status = "SKIP_ARCHIVE_ONLY"
+            elif not item["data_current"] or not item["current_quote_fresh"]:
                 status = "SKIP_STALE_DATA"
+            elif item["notification_class"] == "CANCELLATION":
+                status = item["cancellation_delivery_status"]
+            elif item["notification_class"] == "MARKET_RISK":
+                status = live["current_risk_status"]
+            elif (
+                item.get("invalidation_price")
+                and item["current_price"] < item["invalidation_price"]
+            ):
+                status = "SKIP_INVALIDATION_REACHED"
             elif item["level"] == "STRONG" and item["rule_id"] == "pre-pump-fusion":
                 status = pre_pump_delivery_status(item, item["current_price"], now)
             item["delivery_status"] = status
         page["as_of"] = now.isoformat()
+        page["delivery_policy_version"] = DELIVERY_POLICY_VERSION
+        page["delivery_groups_preview"] = build_deliveries(page["items"])
+        page["grouping_scope"] = "PAGE_PREVIEW_ONLY_DRAIN_BATCH_BEFORE_GROUPING"
         return page
+
+    @app.post("/api/alerts/notifications/receipts")
+    def notification_receipts(receipt: NotificationReceipt):
+        try:
+            store.save_notification_receipt(
+                receipt.notification_ids,
+                receipt.status,
+                receipt.message_id,
+                receipt.reason,
+                utc_now(),
+            )
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        return store.notification_receipts(receipt.notification_ids)
+
+    @app.get("/api/strategies")
+    def strategies(asset_id: str | None = None, limit: int = Query(default=100, ge=1, le=5000)):
+        return strategy_report(store, config, utc_now(), asset_id=asset_id, limit=limit)
 
     @app.get("/api/alerts/{alert_id}")
     def alert_detail(alert_id: str):
@@ -497,6 +617,7 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             "scheduled_research": config.enable_background_intelligence
             and "research" in config.background_scopes,
             "btc_assessment": btc_assessment(store, config, now),
+            "strategies": strategy_report(store, config, now, limit=1500),
             "events": EventEngine(store, config, public).calendar(now),
             "event_reactions": macro.event_reactions(now),
             "event_checks": store.state("event_checks"),

@@ -144,8 +144,13 @@ def test_numeric_evidence_updates_do_not_reset_read_state_or_notify(settings, st
     assert updated["notification_revision"] == first["notification_revision"]
     assert len(store.alert_events(first["id"])) == 2
     upgraded = publish_alert(store, signal, {"score": 81}, now + timedelta(minutes=2), settings)
-    assert upgraded["read_at"] is None
-    assert upgraded["notification_revision"] != first["notification_revision"]
+    assert upgraded["read_at"] == now.isoformat()
+    assert upgraded["notification_revision"] == first["notification_revision"]
+    assert len(store.alert_events(first["id"])) == 2
+    signal.evidence.append("新增独立的成交方向条件")
+    revised = publish_alert(store, signal, {"score": 81}, now + timedelta(minutes=3), settings)
+    assert revised["read_at"] is None
+    assert revised["notification_revision"] != first["notification_revision"]
     assert len(store.alert_events(first["id"])) == 3
 
 

@@ -3,7 +3,7 @@ import logging
 import time
 from datetime import datetime
 
-from .alerts import publish_alert
+from .alerts import market_risk_status, publish_alert
 from .async_io import run_sync
 from .btc_intelligence import apply_btc_context
 from .config import Settings
@@ -27,6 +27,7 @@ from .providers import Providers
 from .ranking import rank_assets
 from .rules import market_regime, usable
 from .storage import Store
+from .strategy_audit import attach_publication, record, save_run
 from .validation import validate_pending
 
 logger = logging.getLogger(__name__)
@@ -249,6 +250,7 @@ class Collector:
 
     def _process_signals(self, snapshots: list[Snapshot], regime: Regime, now: datetime) -> int:
         count = 0
+        evaluations = []
         by_asset = {s.asset_id: s for s in snapshots}
         rankings = {r["asset_id"]: r for r in self.store.rankings(now)}
         for old in self.store.signals(limit=100000, as_of=now):
@@ -276,7 +278,10 @@ class Collector:
                     reason = "价格跌破失效参考位"
                 elif snapshot.risk and snapshot.risk.blockers:
                     reason = "代币风险检查出现阻断项"
-            if regime.risk_mode in ("RISK_OFF", "LEVERAGE_OVERHEAT"):
+            if old.model_version != "context-observation" and regime.risk_mode in (
+                "RISK_OFF",
+                "LEVERAGE_OVERHEAT",
+            ):
                 reason = f"BTC 风险升至 {regime.risk_mode}"
             if reason:
                 self.store.add_event(
@@ -305,16 +310,55 @@ class Collector:
                         }
                     )
                     self.store.save_signal(invalidated)
-                    publish_alert(self.store, invalidated, None, now, self.settings)
+                    alert = publish_alert(self.store, invalidated, None, now, self.settings)
+                    row = []
+                    record(
+                        row,
+                        reference,
+                        old.rule_id,
+                        signal=invalidated,
+                        reasons=[reason],
+                        role="LIFECYCLE",
+                    )
+                    attach_publication(row, invalidated, alert)
+                    row[0]["rule_id"] = "invalidation:" + old.rule_id
+                    evaluations += row
                     count += 1
         for snapshot in snapshots:
-            candidates = decide(snapshot, regime, now, self.settings, self.store)
+            trace = []
+            candidates = decide(snapshot, regime, now, self.settings, self.store, trace)
+            for row in trace:
+                if (
+                    row["rule_id"] not in ("spot-sell-pressure", "leverage-overheat")
+                    or row["status"] != "NOT_TRIGGERED"
+                ):
+                    continue
+                previous = self.store.active_alert(snapshot.asset_id, row["rule_id"], now)
+                if previous and previous["level"] == "CRITICAL_RISK":
+                    previous["resolved_at"] = now.isoformat()
+                    self.store.save_alert(
+                        previous,
+                        {
+                            "event_at": now.isoformat(),
+                            "reason": "风险条件解除",
+                            "action": "resolve",
+                        },
+                    )
+                    row.update(
+                        alert_id=previous["id"],
+                        publication="RISK_CLEARED",
+                        publication_reason="新鲜且完整的输入显示风险条件解除",
+                    )
             for signal in candidates:
                 rank = rankings.get(snapshot.asset_id)
                 previous = self.store.last_signal_time(signal.asset_id, signal.rule_id, signal.kind)
+                risk_reactivated = signal.kind == SignalKind.RISK and not self.store.active_alert(
+                    signal.asset_id, signal.rule_id, now
+                )
                 if (
                     previous
                     and (now - previous).total_seconds() < self.settings.alert_cooldown_seconds
+                    and not risk_reactivated
                 ):
                     # Web lifecycle updates independently from legacy signal-row cooldown.
                     existing = self.store.signal(signal.id)
@@ -322,11 +366,25 @@ class Collector:
                         active = self.store.active_alert(signal.asset_id, signal.rule_id, now)
                         if active:
                             signal.id = active["signal_id"]
-                            publish_alert(self.store, signal, rank, now, self.settings)
+                            alert = publish_alert(self.store, signal, rank, now, self.settings)
+                            attach_publication(trace, signal, alert, cooldown=True, regime=regime)
+                        else:
+                            for row in trace:
+                                if row["rule_id"] == signal.rule_id:
+                                    row.update(
+                                        publication="COOLDOWN",
+                                        publication_reason="冷却期内且无活跃预警",
+                                        cooldown=True,
+                                        candidate_id=row["signal_id"],
+                                        signal_id=None,
+                                    )
                     continue
                 self.store.save_signal(signal)
-                publish_alert(self.store, signal, rank, now, self.settings)
+                alert = publish_alert(self.store, signal, rank, now, self.settings)
+                attach_publication(trace, signal, alert, regime=regime)
                 count += 1
+            evaluations += trace
+        save_run(self.store, evaluations, now)
         return count
 
 
@@ -348,6 +406,11 @@ def signal_view(
         current_assets = {s.asset_id: s for s in store.latest_snapshots(now)}
     current = current_assets.get(signal.asset_id)
     data_current = bool(current and usable(current, now, settings))
+    if signal.kind == SignalKind.RISK:
+        status = market_risk_status({"rule_id": signal.rule_id}, current, now, settings)
+        result["current_risk_status"] = status
+        if state == "ACTIVE" and status != "READY":
+            state = "RESOLVED" if status == "SKIP_RISK_CLEARED" else "PAUSED"
     if signal.kind == SignalKind.ENTRY_CANDIDATE:
         core = current_assets.get("binance:BTCUSDT")
         regime = current_regime or market_regime(core, now, settings)

@@ -10,6 +10,8 @@
 
 [免费 BTC 数据](docs/free-btc-data.md)已提供日线 MVRV、延迟 SOPR / 持有人成本、Deribit 期权和采样清算的手动采集、归档与网页入口。云端可执行 `.venv/bin/muse free-data --scope all`；宏观、稳定币和 ETF 同时复用现有免费适配器。
 
+[策略运行与推送接入](docs/strategy-observability.md)说明评分分离、同币合并、A–F 子模式诊断和 Muse 发送回执。BTC 宏观、估值、持有人成本和期权波动率新增 WATCH 观察验证，使用已归档数据，不自动推广为入场策略。
+
 ## 已实现的第一阶段
 
 - Canonical 资产注册表、每日动态名单、固定观察名单、最多 10 次常规替换和 20/30/50 分层。固定名单占用山寨币名额，BTC/ETH 不占用。

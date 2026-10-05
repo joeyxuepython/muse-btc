@@ -1,8 +1,8 @@
 """Explainable BTC evidence context; scores are uncalibrated, never probabilities."""
 
-import statistics
 from datetime import datetime, timedelta
 
+from .context_observations import mvrv_window, observations, option_sample
 from .intelligence import IntelligenceStore
 from .macro import MacroEngine
 from .rules import component_usable, usable
@@ -115,17 +115,7 @@ def btc_assessment(store, settings, now, btc=None):
         [r["id"] for r in macro["stablecoins"]],
     )
     onchain = archive.records("onchain", now, limit=100000)
-    mvrv = sorted(
-        [r for r in onchain if r.source == "Coin Metrics" and r.data.get("metric") == "mvrv"],
-        key=lambda r: r.market_time,
-    )
-    percentile = None
-    if len(mvrv) >= 30 and (now - mvrv[-1].market_time).days <= 3:
-        percentile = (
-            sum(r.data["value"] <= mvrv[-1].data["value"] for r in mvrv[-365:])
-            / len(mvrv[-365:])
-            * 100
-        )
+    mvrv, percentile = mvrv_window(onchain, now)
     add(
         "onchain_valuation_percentile",
         round(percentile, 1) if percentile is not None else None,
@@ -134,23 +124,16 @@ def btc_assessment(store, settings, now, btc=None):
         [mvrv[-1].id] if mvrv else [],
     )
     options = archive.records("options", now, limit=1)
-    iv = []
-    if (
-        options
-        and (now - options[0].market_time).total_seconds()
-        <= settings.btc_options_refresh_seconds * 2
-    ):
-        iv = [
-            r["mark_iv_pct"]
-            for r in options[0].data.get("chain", [])
-            if r.get("mark_iv_pct") is not None
-        ]
+    sample, iv = option_sample(options, now, settings)
     add(
         "options_iv",
         None,
-        "AVAILABLE" if iv else "MISSING",
-        [f"Deribit IV 中位数：{statistics.median(iv) if iv else '缺失'}；单市场快照"],
-        [options[0].id] if iv else [],
+        "AVAILABLE" if iv is not None else "MISSING",
+        [
+            f"Deribit 7–30 天平值 IV 中位数：{iv if iv is not None else '缺失'}；"
+            f"有效样本 {len(sample)} 项，单市场快照"
+        ],
+        [options[0].id] if iv is not None else [],
     )
     current_documents = {r.id for r in archive.records("research", now)}
     reviews = [
@@ -179,7 +162,8 @@ def btc_assessment(store, settings, now, btc=None):
     observed = sum(r["status"] != "MISSING" for r in dimensions.values())
     return {
         "as_of": now.isoformat(),
-        "version": "btc-context-v1",
+        "version": "btc-context-v2",
+        "observations": observations(onchain, options, macro, change, value, now, settings, btc),
         "dimensions": dimensions,
         "coverage_pct": round(observed / len(dimensions) * 100, 1),
         "confidence": "UNCALIBRATED",
@@ -208,6 +192,11 @@ def apply_btc_context(regime, store, settings, now, btc):
     regime.macro = result["macro_risk"]
     regime.evidence_coverage_pct = result["coverage_pct"]
     regime.scope = "BTC_SPOT_PERP_WITH_PUBLIC_CONTEXT"
+    regime.research_context = {
+        "version": result["version"],
+        "as_of": result["as_of"],
+        "observations": result["observations"],
+    }
     regime.contradictions = [s for s in regime.contradictions if "尚未融合" not in s]
     regime.contradictions.append(f"BTC 综合证据覆盖 {result['coverage_pct']}%；置信度尚未校准")
     if result["macro_risk"] == "CAUTION":

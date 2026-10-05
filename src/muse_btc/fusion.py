@@ -6,6 +6,7 @@ from .context import asset_context
 from .intelligence import IntelligenceStore, digest
 from .models import Module, SignalKind
 from .rules import _signal, component_usable, usable
+from .strategy_audit import record
 
 
 def enrich_rankings(rows, snapshots, store, now, settings):
@@ -92,8 +93,15 @@ def enrich_rankings(rows, snapshots, store, now, settings):
     return rows
 
 
-def pre_pump_signals(snapshot, regime, now, settings, store):
+def pre_pump_signals(snapshot, regime, now, settings, store, trace=None):
     if snapshot.module != Module.ALT or not usable(snapshot, now, settings):
+        record(
+            trace,
+            snapshot,
+            "pre-pump-fusion",
+            status="NOT_APPLICABLE" if snapshot.module != Module.ALT else "MISSING_DATA",
+            reasons=["仅适用于行情有效的 ALT"],
+        )
         return []
     f, t = snapshot.features, settings.rule_thresholds
     flat = f.return_15m_pct is not None and abs(f.return_15m_pct) <= t["flat_price_pct"]
@@ -159,7 +167,56 @@ def pre_pump_signals(snapshot, regime, now, settings, store):
         ):
             patterns.append("F: 吸筹假设 / 卖方深度收缩")
             groups.update(("price", "spot_flow", "order_book"))
+    if trace is not None:
+        requirements = {
+            "A": ("return_15m_pct", "relative_volume"),
+            "B": ("return_15m_pct", "oi_change_5m_pct", "funding_rate_pct"),
+            "C": ("spot_taker_buy_ratio", "spot_perp_structure"),
+            "D": ("oi_change_5m_pct", "funding_rate_pct", "return_5m_pct"),
+            "E": ("relative_strength_15m_pct", "relative_volume", "funding_rate_pct"),
+            "F": (
+                "return_15m_pct",
+                "spot_taker_buy_ratio",
+                "spot_cvd_window",
+                "ask_depth_1pct_usd",
+            ),
+        }
+        for pattern, names in requirements.items():
+            inputs = {name: getattr(f, name) for name in names}
+            for field, component in (
+                ("oi_change_5m_pct", "oi_history"),
+                ("funding_rate_pct", "funding"),
+                ("ask_depth_1pct_usd", "book"),
+                ("spot_taker_buy_ratio", "candles"),
+            ):
+                if field in inputs and not component_usable(snapshot, component, now, settings):
+                    inputs[field] = None
+            if pattern == "E":
+                inputs["btc_return_15m_pct"] = (
+                    btc.features.return_15m_pct if btc and usable(btc, now, settings) else None
+                )
+            if pattern == "F":
+                inputs["previous_cvd"] = old[-1].features.spot_cvd_window if old else None
+                inputs["previous_ask_depth"] = old[-1].features.ask_depth_1pct_usd if old else None
+            record(
+                trace,
+                snapshot,
+                "pre-pump:" + pattern,
+                inputs=inputs,
+                role="PATTERN",
+                status="MATCHED" if any(p.startswith(pattern + ":") for p in patterns) else None,
+            )
     if not patterns:
+        missing = bool(trace) and all(
+            r["status"] == "MISSING_DATA" for r in trace if r["role"] == "PATTERN"
+        )
+        record(
+            trace,
+            snapshot,
+            "pre-pump-fusion",
+            status="MISSING_DATA" if missing else "NOT_TRIGGERED",
+            reasons=["A–F 无已确认匹配；逐项缺失见子模式"],
+        )
         return []
     if spot:
         groups.add("spot_flow")
@@ -199,4 +256,19 @@ def pre_pump_signals(snapshot, regime, now, settings, store):
     )
     signal.rule_version = "fusion-v4-3:" + settings.threshold_version
     signal.signal_version = "signals-v4-3"
+    signal.patterns = patterns
+    signal.context = regime.research_context
+    record(
+        trace,
+        snapshot,
+        "pre-pump-fusion",
+        signal=signal,
+        inputs={
+            "patterns": patterns,
+            "evidence_groups": sorted(groups),
+            "funding_ready": funding_ready,
+            "liquid": liquid,
+            "btc_risk_mode": regime.risk_mode,
+        },
+    )
     return [signal]

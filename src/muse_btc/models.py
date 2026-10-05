@@ -161,6 +161,7 @@ class Regime(Record):
     evidence: list[str] = []
     contradictions: list[str] = []
     btc_snapshot_id: str | None = None
+    research_context: dict = {}
 
 
 class SignalKind(StrEnum):
@@ -190,6 +191,7 @@ class Signal(Record):
     reference_price: float = Field(gt=0)
     entry_zone: list[float] | None = None
     invalidation_price: float | None = None
+    invalidation_method: str | None = None
     invalidation_conditions: list[str] = []
     expires_at: AwareDatetime
     horizon_seconds: int
@@ -197,6 +199,8 @@ class Signal(Record):
     feature_version: str = "features-v1"
     signal_version: str = "signals-v1"
     model_version: str = "rules-only"
+    patterns: list[str] = []
+    context: dict = {}
 
 
 class SignalEvent(Record):
