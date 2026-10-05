@@ -653,6 +653,12 @@ def create_app(settings: Settings | None = None, providers_factory=Providers) ->
             "as_of": now.isoformat(),
             "enabled": config.enable_entry_quality,
             "market_confirmation_mode": config.market_confirmation_mode,
+            "collection_plan": {
+                "detail_batch_size": config.detail_batch_size,
+                "poll_seconds": config.poll_seconds,
+                "stale_seconds": config.stale_seconds,
+                "last_coverage": getattr(providers, "coverage", {}),
+            },
             "assets": quality_contexts(store, now, config),
             "production_accuracy": "NOT_ESTABLISHED",
         }

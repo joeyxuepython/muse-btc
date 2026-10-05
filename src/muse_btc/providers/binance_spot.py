@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 from datetime import datetime
 
 from ..async_io import run_sync
@@ -118,6 +119,11 @@ class BinanceSpotProvider:
                 for s in snapshots
             ),
             "scheduled_details": len(details),
+            "configured_detail_batch_size": self.settings.detail_batch_size,
+            "estimated_detail_refresh_seconds": (
+                max(1, math.ceil((len(selected) - len(CORE)) / self.settings.detail_batch_size))
+                * self.settings.poll_seconds
+            ),
             "updated_at": at.isoformat(),
             "symbols": [r["binance_symbol"] for r in selected],
             "missing_quotes": [
@@ -127,6 +133,9 @@ class BinanceSpotProvider:
             "missing_pins": self.selection["missing_pins"],
             "universe_updated_at": self.selection["selected_at"],
         }
+        self.coverage["confirmation_cadence_feasible"] = (
+            self.coverage["estimated_detail_refresh_seconds"] <= self.settings.stale_seconds
+        )
         return snapshots
 
     async def _asset(self, entry, ticker, quote_received, common, scheduled, old):

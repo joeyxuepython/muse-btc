@@ -78,7 +78,11 @@ def main() -> None:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     sub.add_parser("collect", help="执行一轮真实公开数据采集")
-    sub.add_parser("validate", help="计算已到期提醒的前瞻表现")
+    validate = sub.add_parser("validate", help="计算已到期提醒的前瞻表现")
+    validate.add_argument(
+        "--retry-missing", action="store_true", help="导入缺失历史数据后，重新检查已关闭的缺失窗口"
+    )
+    sub.add_parser("validation-worker", help="独立运行限量历史评估；不采集行情或研究")
     sub.add_parser("quality-report", help="只读取归档，检查入场质量和市场买盘覆盖")
     backtest = sub.add_parser("replay", help="对真实归档快照进行时间点重放")
     backtest.add_argument("--start", required=True, type=parse_time)
@@ -124,7 +128,14 @@ def main() -> None:
         uvicorn.run(create_app(settings), host=args.host, port=args.port)
         return
     store = Store(settings.database_path)
-    if args.command == "worker":
+    if args.command == "validation-worker":
+        from .validation_worker import ValidationWorker
+
+        try:
+            asyncio.run(ValidationWorker(store, settings).run())
+        except KeyboardInterrupt:
+            pass
+    elif args.command == "worker":
 
         async def run_worker():
             providers = Providers(settings, store)
@@ -158,7 +169,7 @@ def main() -> None:
         if result["status"] not in ("COMPLETE", "BUSY"):
             raise SystemExit(1)
     elif args.command == "validate":
-        validate_pending(store, utc_now(), settings)
+        validate_pending(store, utc_now(), settings, retry_missing=args.retry_missing)
         print(json.dumps(validation_report(store, settings), ensure_ascii=False, indent=2))
     elif args.command == "quality-report":
         print(

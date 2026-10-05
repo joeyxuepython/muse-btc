@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     market_confirmation_min_assets: int = Field(default=5, ge=2, le=100)
     market_confirmation_min_coverage: float = Field(default=0.7, gt=0, le=1)
     validation_min_samples: int = Field(default=30, ge=10)
+    enable_background_validation: bool = True
+    validation_batch_size: int = Field(default=16, ge=1, le=256)
+    validation_budget_seconds: float = Field(default=2, ge=0.05, le=30)
+    validation_tick_seconds: int = Field(default=10, ge=1, le=300)
     # Keep the default request weight; cloud operators can increase after measuring coverage.
     spot_depth_limit: int = Field(default=100, ge=100, le=1000)
     max_memes: int = Field(default=8, ge=1, le=30)

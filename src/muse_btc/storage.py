@@ -10,7 +10,18 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .models import Outcome, ProviderStatus, Regime, Signal, SignalEvent, Snapshot, new_id
+from .models import (
+    Module,
+    Outcome,
+    ProviderStatus,
+    Regime,
+    Signal,
+    SignalEvent,
+    SignalKind,
+    Snapshot,
+    SnapshotQuote,
+    new_id,
+)
 
 
 def stamp(value: datetime) -> str:
@@ -41,11 +52,20 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS snapshots_asset_time
                     ON snapshots(asset_id, available_at);
+                CREATE INDEX IF NOT EXISTS snapshots_time ON snapshots(available_at);
                 CREATE TABLE IF NOT EXISTS signals (
                     id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, rule_id TEXT NOT NULL,
                     kind TEXT NOT NULL, emitted_at TEXT NOT NULL, payload TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS signals_asset_time ON signals(asset_id, emitted_at);
+                CREATE TABLE IF NOT EXISTS validation_jobs (
+                    signal_id TEXT NOT NULL, horizon_seconds INTEGER NOT NULL,
+                    due_at TEXT NOT NULL, next_attempt_at TEXT NOT NULL,
+                    state TEXT NOT NULL DEFAULT 'PENDING', checked_at TEXT,
+                    PRIMARY KEY(signal_id,horizon_seconds)
+                );
+                CREATE INDEX IF NOT EXISTS validation_due
+                    ON validation_jobs(state,next_attempt_at,due_at);
                 CREATE TABLE IF NOT EXISTS signal_events (
                     id TEXT PRIMARY KEY, signal_id TEXT NOT NULL,
                     event_at TEXT NOT NULL, state TEXT NOT NULL, payload TEXT NOT NULL
@@ -336,6 +356,121 @@ class Store:
             rows = db.execute(query, args).fetchall()
         return [Snapshot.model_validate_json(row[0]) for row in rows]
 
+    def quote_range(self, start, end, asset_id) -> list[SnapshotQuote]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT id,asset_id,market_time,available_at,json_extract(payload,'$.price') price "
+                "FROM snapshots WHERE asset_id=? AND available_at>=? AND available_at<=? "
+                "ORDER BY available_at,rowid",
+                (asset_id, stamp(start), stamp(end)),
+            ).fetchall()
+        return [SnapshotQuote.model_validate(dict(row)) for row in rows]
+
+    def active_signals(self, as_of) -> list[Signal]:
+        # Do not deserialize every expired historical signal and reopen its event history.
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT s.payload FROM signals s WHERE s.emitted_at<=? "
+                "AND s.kind IN ('WATCH','ENTRY_CANDIDATE') "
+                "AND COALESCE((SELECT e.state FROM signal_events e WHERE e.signal_id=s.id "
+                "ORDER BY e.event_at DESC,e.rowid DESC LIMIT 1),'ACTIVE')='ACTIVE' "
+                "ORDER BY s.emitted_at DESC,s.rowid DESC",
+                (stamp(as_of),),
+            ).fetchall()
+        return [Signal.model_validate_json(row[0]) for row in rows]
+
+    @staticmethod
+    def _enqueue_validation(db, signal):
+        from .validation import HORIZONS
+
+        if signal.module == Module.MEME or signal.kind == SignalKind.INVALIDATED:
+            return
+        db.executemany(
+            "INSERT OR IGNORE INTO validation_jobs"
+            "(signal_id,horizon_seconds,due_at,next_attempt_at) "
+            "SELECT ?,?,?,? WHERE NOT EXISTS "
+            "(SELECT 1 FROM outcomes WHERE signal_id=? AND horizon_seconds=?)",
+            [
+                (
+                    signal.id,
+                    h,
+                    stamp(signal.emitted_at + timedelta(seconds=h)),
+                    stamp(signal.emitted_at + timedelta(seconds=h)),
+                    signal.id,
+                    h,
+                )
+                for h in HORIZONS
+            ],
+        )
+
+    def seed_validation_jobs(self, limit=128) -> int:
+        """Incremental, durable backfill for archives created before the queue existed."""
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT payload FROM runtime_state WHERE key='validation_seed_cursor'"
+            ).fetchone()
+            cursor = json.loads(row[0]) if row else 0
+            rows = db.execute(
+                "SELECT rowid,payload FROM signals WHERE rowid>? ORDER BY rowid LIMIT ?",
+                (cursor, limit),
+            ).fetchall()
+            for row in rows:
+                self._enqueue_validation(db, Signal.model_validate_json(row["payload"]))
+            if rows:
+                db.execute(
+                    "INSERT OR REPLACE INTO runtime_state VALUES ('validation_seed_cursor',?)",
+                    (json.dumps(rows[-1]["rowid"]),),
+                )
+        return len(rows)
+
+    def due_validation_jobs(self, now, limit):
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT j.*,s.payload FROM validation_jobs j JOIN signals s ON s.id=j.signal_id "
+                "WHERE j.state='PENDING' AND j.next_attempt_at<=? AND j.due_at<=? "
+                "AND NOT EXISTS (SELECT 1 FROM outcomes o WHERE o.signal_id=j.signal_id "
+                "AND o.horizon_seconds=j.horizon_seconds) "
+                "ORDER BY j.next_attempt_at,j.due_at,j.signal_id,j.horizon_seconds LIMIT ?",
+                (stamp(now), stamp(now), limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def defer_validation(self, signal_id, horizon, now, next_attempt, *, missing=False):
+        with self.connect() as db:
+            db.execute(
+                "UPDATE validation_jobs SET state=?,next_attempt_at=?,checked_at=? "
+                "WHERE signal_id=? AND horizon_seconds=? AND state!='DONE'",
+                (
+                    "MISSING" if missing else "PENDING",
+                    stamp(next_attempt),
+                    stamp(now),
+                    signal_id,
+                    horizon,
+                ),
+            )
+
+    def retry_missing_validation(self, now):
+        with self.connect() as db:
+            return db.execute(
+                "UPDATE validation_jobs SET state='PENDING',next_attempt_at=? "
+                "WHERE state='MISSING'",
+                (stamp(now),),
+            ).rowcount
+
+    def validation_queue(self, now):
+        with self.connect() as db:
+            counts = {
+                row[0]: row[1]
+                for row in db.execute("SELECT state,COUNT(*) FROM validation_jobs GROUP BY state")
+            }
+            due = db.execute(
+                "SELECT COUNT(*),MIN(due_at) FROM validation_jobs "
+                "WHERE state='PENDING' AND due_at<=? AND next_attempt_at<=?",
+                (stamp(now), stamp(now)),
+            ).fetchone()
+        return {"counts": counts, "due_count": due[0], "oldest_due_at": due[1]}
+
     def save_signal(self, signal: Signal) -> None:
         for snapshot_id in [signal.snapshot_id, signal.btc_snapshot_id]:
             if snapshot_id:
@@ -371,6 +506,7 @@ class Store:
                     event.model_dump_json(),
                 ),
             )
+            self._enqueue_validation(db, signal)
 
     def add_event(self, event: SignalEvent) -> None:
         with self.connect() as db:
@@ -430,6 +566,11 @@ class Store:
             result = db.execute(
                 "INSERT OR IGNORE INTO outcomes VALUES (?,?,?)",
                 (outcome.signal_id, outcome.horizon_seconds, outcome.model_dump_json()),
+            )
+            db.execute(
+                "UPDATE validation_jobs SET state='DONE',checked_at=? "
+                "WHERE signal_id=? AND horizon_seconds=?",
+                (stamp(outcome.evaluated_at), outcome.signal_id, outcome.horizon_seconds),
             )
         return result.rowcount == 1
 

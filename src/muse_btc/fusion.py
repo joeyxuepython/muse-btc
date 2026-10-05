@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 
-from .context import asset_context
+from .context import asset_context, asset_contexts
 from .intelligence import IntelligenceStore, digest
 from .models import Module, SignalKind
 from .rules import _signal, component_usable, usable
@@ -12,6 +12,7 @@ from .strategy_audit import record
 def enrich_rankings(rows, snapshots, store, now, settings):
     by_id = {s.asset_id: s for s in snapshots}
     archive = IntelligenceStore(store)
+    contexts = asset_contexts(archive, by_id, now)
     factors = {
         "relative_volume": "relative_volume",
         "oi_acceleration": "oi_acceleration_pct",
@@ -40,8 +41,7 @@ def enrich_rankings(rows, snapshots, store, now, settings):
     for row in rows:
         row["rank_comparison_basis"] = comparison_basis
         row["rank_change_comparable"] = False
-        context = asset_context(archive, row["asset_id"], now)
-        row["context"] = context
+        row["context"] = contexts[row["asset_id"]]
         row["component_ranks"] = {}
         row["component_percentiles"] = {}
         row["rank_velocity_per_hour"] = None

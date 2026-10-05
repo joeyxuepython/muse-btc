@@ -87,6 +87,8 @@ async def test_102_quotes_rotation_meme_eligibility_and_detail_failure(settings,
         assert len(detailed) == 102  # All candles sampled; failed PEPE book stays missing.
         assert len(set(prices)) == 10
         assert providers.coverage["quotes"] == providers.coverage["selected"] == 102
+        assert providers.coverage["estimated_detail_refresh_seconds"] == 600
+        assert not providers.coverage["confirmation_cadence_feasible"]
         assert any(s.symbol == "PEPEUSDT" and s.features.spread_bps is None for s in result)
         assert sum(r.url.path.endswith("/depth") for r in calls) == 220
         assert not any("dexscreener" in r.url.host or "goplus" in r.url.host for r in calls)
