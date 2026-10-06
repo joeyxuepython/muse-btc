@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from .evaluation_policy import signal_evaluation
 from .models import (
     Module,
     Outcome,
@@ -381,9 +382,15 @@ class Store:
 
     @staticmethod
     def _enqueue_validation(db, signal):
-        from .validation import HORIZONS
-
-        if signal.module == Module.MEME or signal.kind == SignalKind.INVALIDATED:
+        plan = signal_evaluation(signal)
+        horizons = plan.horizons_seconds if plan else ()
+        condition = " AND horizon_seconds NOT IN (" + ",".join("?" for _ in horizons) + ")"
+        db.execute(
+            "UPDATE validation_jobs SET state='RETIRED_POLICY' WHERE signal_id=? "
+            "AND state IN ('PENDING','MISSING')" + (condition if horizons else ""),
+            (signal.id, *horizons),
+        )
+        if not horizons:
             return
         db.executemany(
             "INSERT OR IGNORE INTO validation_jobs"
@@ -399,7 +406,7 @@ class Store:
                     signal.id,
                     h,
                 )
-                for h in HORIZONS
+                for h in horizons
             ],
         )
 
@@ -408,7 +415,7 @@ class Store:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
-                "SELECT payload FROM runtime_state WHERE key='validation_seed_cursor'"
+                "SELECT payload FROM runtime_state WHERE key='validation_policy_seed_cursor'"
             ).fetchone()
             cursor = json.loads(row[0]) if row else 0
             rows = db.execute(
@@ -419,7 +426,8 @@ class Store:
                 self._enqueue_validation(db, Signal.model_validate_json(row["payload"]))
             if rows:
                 db.execute(
-                    "INSERT OR REPLACE INTO runtime_state VALUES ('validation_seed_cursor',?)",
+                    "INSERT OR REPLACE INTO runtime_state VALUES "
+                    "('validation_policy_seed_cursor',?)",
                     (json.dumps(rows[-1]["rowid"]),),
                 )
         return len(rows)
@@ -450,6 +458,14 @@ class Store:
                 ),
             )
 
+    def retire_validation(self, signal_id, horizon):
+        with self.connect() as db:
+            db.execute(
+                "UPDATE validation_jobs SET state='RETIRED_POLICY' "
+                "WHERE signal_id=? AND horizon_seconds=? AND state IN ('PENDING','MISSING')",
+                (signal_id, horizon),
+            )
+
     def retry_missing_validation(self, now):
         with self.connect() as db:
             return db.execute(
@@ -472,6 +488,12 @@ class Store:
         return {"counts": counts, "due_count": due[0], "oldest_due_at": due[1]}
 
     def save_signal(self, signal: Signal) -> None:
+        if (
+            signal.evaluation is None
+            and signal.module != Module.MEME
+            and signal.kind != SignalKind.INVALIDATED
+        ):
+            raise ValueError("New signals must declare their evaluation plan")
         for snapshot_id in [signal.snapshot_id, signal.btc_snapshot_id]:
             if snapshot_id:
                 snapshot = self.snapshot(snapshot_id)

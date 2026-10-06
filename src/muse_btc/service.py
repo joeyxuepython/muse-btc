@@ -11,6 +11,7 @@ from .context import asset_contexts
 from .decision_explanation import lifecycle_decision
 from .decisions import decide
 from .entry_quality import ENTRY_RULES, quality_contexts
+from .evaluation_policy import evaluation_id, signal_evaluation
 from .fusion import enrich_rankings
 from .intelligence import IntelligenceStore
 from .microstructure import archive_snapshot_trades
@@ -448,6 +449,9 @@ def signal_view(
     current_regime: Regime | None = None,
 ) -> dict:
     result = signal.model_dump(mode="json")
+    plan = signal_evaluation(signal)
+    result["evaluation_policy_id"] = evaluation_id(plan) if plan else None
+    result["evaluation_lifecycle_note"] = "评估到期只记录表现，失效由独立条件或有效期决定"
     events = store.signal_events(signal.id)
     state = events[-1].state if events else "ACTIVE"
     if state == "ACTIVE" and signal.expires_at <= now:

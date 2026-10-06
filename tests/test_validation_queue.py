@@ -89,7 +89,7 @@ def test_backfill_cursor_is_incremental_and_preserves_completed_labels(store, se
     assert store.seed_validation_jobs(1) == 1
     assert Store(store.path).seed_validation_jobs(1) == 1
     assert store.seed_validation_jobs(1) == 0
-    assert store.validation_queue(now)["counts"]["PENDING"] == 17
+    assert store.validation_queue(now)["counts"]["PENDING"] == 5
     assert store.outcomes()[0] == outcome
 
 

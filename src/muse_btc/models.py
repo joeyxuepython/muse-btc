@@ -1,8 +1,9 @@
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Annotated, Literal
 from uuid import uuid4
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 
 def utc_now() -> datetime:
@@ -171,6 +172,24 @@ class SignalKind(StrEnum):
     INVALIDATED = "INVALIDATED"
 
 
+class SignalEvaluation(Record):
+    """A rule's predeclared measurement plan, independent of signal expiry."""
+
+    version: str = "strategy-validation-v1"
+    metric: Literal["LONG_RETURN", "RISK_DIRECTION", "VOLATILITY"]
+    horizons_seconds: tuple[Annotated[int, Field(gt=0)], ...] = Field(min_length=1)
+    primary_horizon_seconds: int = Field(gt=0)
+    rationale: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def declared_primary(self):
+        if len(set(self.horizons_seconds)) != len(self.horizons_seconds):
+            raise ValueError("Evaluation horizons must be unique")
+        if self.primary_horizon_seconds not in self.horizons_seconds:
+            raise ValueError("Primary horizon must belong to the declared horizons")
+        return self
+
+
 class Signal(Record):
     id: str = Field(default_factory=new_id)
     asset_id: str
@@ -194,7 +213,9 @@ class Signal(Record):
     invalidation_method: str | None = None
     invalidation_conditions: list[str] = []
     expires_at: AwareDatetime
+    # Legacy notification/grouping window; strategy periods live in evaluation.
     horizon_seconds: int
+    evaluation: SignalEvaluation | None = None
     parent_signal_id: str | None = None
     feature_version: str = "features-v1"
     signal_version: str = "signals-v1"
@@ -235,10 +256,18 @@ class Outcome(Record):
     max_favorable_pct: float
     max_adverse_pct: float
     paper_net_return_pct: float | None = None
-    round_trip_cost_bps: float
+    round_trip_cost_bps: float | None = None
     sample_count: int
     max_observation_gap_seconds: float
     max_allowed_gap_seconds: float | None = None
     label_available_at: AwareDatetime | None = None
     time_to_mfe_seconds: float | None = None
     time_to_mae_seconds: float | None = None
+    evaluation_policy_id: str | None = None
+    evaluation_metric: str | None = None
+    risk_terminal_decline: bool | None = None
+    risk_window_decline: bool | None = None
+    risk_max_decline_pct: float | None = Field(default=None, ge=0)
+    risk_max_rebound_pct: float | None = Field(default=None, ge=0)
+    observed_range_pct: float | None = Field(default=None, ge=0)
+    absolute_end_change_pct: float | None = Field(default=None, ge=0)

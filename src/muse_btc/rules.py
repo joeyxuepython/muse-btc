@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from .config import Settings
+from .evaluation_policy import declared_evaluation
 from .models import Module, Regime, Signal, SignalKind, Snapshot
 from .strategy_audit import BASIC_INPUTS, record
 
@@ -118,7 +119,10 @@ def _signal(
     score: float,
     contradictions: list[str] | None = None,
 ) -> Signal:
-    horizon = 900 if snapshot.module == Module.MEME else 3600
+    evaluation = declared_evaluation(rule_id)
+    # Keep the legacy notification/grouping window and lifecycle independent of
+    # the declared measurement plan; changing them would split existing alerts.
+    notification_window = 900 if snapshot.module == Module.MEME else 3600
     stop_distance = max(
         (snapshot.features.atr14 or snapshot.price * 0.01) * 2, snapshot.price * 0.005
     )
@@ -155,8 +159,9 @@ def _signal(
         ]
         if opportunity
         else ["风险条件解除"],
-        expires_at=now + timedelta(seconds=horizon * 4),
-        horizon_seconds=horizon,
+        expires_at=now + timedelta(seconds=notification_window * 4),
+        horizon_seconds=notification_window,
+        evaluation=evaluation,
         context=regime.research_context,
     )
 

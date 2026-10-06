@@ -99,10 +99,27 @@ def notification_message(rows, category):
                 f"候选参考区间 {'–'.join(_price(p) for p in zone) if zone else '未记录'}；"
                 f"失效规则阈值 {_price(threshold)}{distance}。",
             ]
+        plan = row.get("evaluation")
+        if category != "CANCELLATION" and plan:
+            primary = plan["primary_horizon_seconds"]
+            auxiliary = [h for h in plan["horizons_seconds"] if h != primary]
+            metric = {
+                "LONG_RETURN": "价格表现",
+                "RISK_DIRECTION": "下跌方向及采样风险路径，不计算持仓收益",
+                "VOLATILITY": "波动范围及绝对变化，不判断涨跌",
+            }[plan["metric"]]
+            lines.append(
+                f"{row['rule_id']} 的评估：{metric}；主评估 {primary / 60:g} 分钟；"
+                "辅助观察 "
+                + (" / ".join(f"{h / 60:g} 分钟" for h in auxiliary) if auxiliary else "无")
+                + "。"
+            )
         if row.get("contradictions"):
             lines.append("限制：" + "；".join(row["contradictions"]) + "。")
     if category != "CANCELLATION":
         lines += explanation_lines(rows)
+        if any(r.get("evaluation") for r in rows):
+            lines.append("评估期限只记录表现，不是持仓到期或卖出指令；失效条件独立判断。")
     if category in ("LONG", "CANCELLATION"):
         methods = {r.get("invalidation_method") for r in rows}
         lines.append(
@@ -156,6 +173,15 @@ def build_deliveries(items):
                 "decision_explanation_version": VERSION,
                 "decision_explanations": [
                     {"notification_id": a["notification_id"], "decision": a.get("decision", {})}
+                    for a in rows
+                ],
+                "evaluation_plans": [
+                    {
+                        "notification_id": a["notification_id"],
+                        "rule_id": a["rule_id"],
+                        "evaluation": a.get("evaluation"),
+                        "evaluation_policy_id": a.get("evaluation_policy_id"),
+                    }
                     for a in rows
                 ],
                 "member_notification_ids": ids,

@@ -4,6 +4,7 @@ import math
 import statistics
 from datetime import datetime, timedelta
 
+from .evaluation_policy import declared_evaluation
 from .models import Module, Signal, SignalKind
 from .rules import usable
 from .strategy_audit import record
@@ -227,6 +228,7 @@ def context_signals(snapshot, regime, now, settings, trace=None):
                 reference_price=snapshot.price,
                 expires_at=now + timedelta(seconds=item["horizon_seconds"]),
                 horizon_seconds=item["horizon_seconds"],
+                evaluation=declared_evaluation(rule),
                 model_version="context-observation",
                 context=item,
             )
