@@ -44,7 +44,7 @@ MUSE_VALIDATION_TICK_SECONDS=10
 - 连续记录至少 10 个主轮次的耗时、轮次间隔及 FETCHING/PERSISTING/EVALUATING，占比和异常均保留。不能把一次快轮次当作长期运行证明。
 - `runtime.validation_worker` 应持续更新，队列 due_count 和 oldest_due_at 可判断积压；MISSING 是关闭的缺失终点，PENDING 可能含尚未到期任务。旧库回填期间结果会逐批补充。
 - 在足够详情刷新后检查质量确认与各失败原因、真实共振覆盖。不要为了出现入场候选降低 freshness、买入占比或完整盘口要求。
-- 保存新的 validation-v2，比较 1h/4h/24h 缺失和断档；已有断档结果不会伪装成改善。真实价格序列修复后，新增版本/时间段的结果应单独评估。
+- 保存新的 validation-v3，按[各策略声明的主/辅助期限](strategy-validation.md)比较缺失和断档；旧结果在 legacy_rules 保留。已有断档结果不会伪装成改善。真实价格序列修复后，新增版本/时间段的结果应单独评估。
 
 当前只完成本地回归和合成归档验证。云端 7.25 GB 数据库的处理耗时、完整覆盖、邮件送达及策略收益须由 Muse 更新后提供真实结果。
 

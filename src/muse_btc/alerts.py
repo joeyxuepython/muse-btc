@@ -3,6 +3,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 
 from .decision_explanation import semantic_signature
+from .evaluation_policy import evaluation_id
 from .models import SignalKind, new_id
 from .rules import component_usable, usable
 
@@ -342,7 +343,7 @@ def publish_alert(store, signal, ranking, now, settings):
             "entry_zone": signal.entry_zone,
             "ranking": ranking,
             "validation_status": "OBSERVATION_ONLY",
-            "signal_version": "web-alert-v4-4",
+            "signal_version": "web-alert-v4-5",
             "rule_version": signal.rule_version,
             "evidence_groups": payload["evidence_groups"],
             "requested_level": requested_level,
@@ -355,6 +356,8 @@ def publish_alert(store, signal, ranking, now, settings):
             "context": signal.context,
             "decision": decision,
             "horizon_seconds": signal.horizon_seconds,
+            "evaluation": signal.evaluation.model_dump(mode="json") if signal.evaluation else None,
+            "evaluation_policy_id": evaluation_id(signal.evaluation) if signal.evaluation else None,
             "score_limitations": "机会分用于横向排名；规则证据分未校准；风险等级不由分数换算",
         }
     )

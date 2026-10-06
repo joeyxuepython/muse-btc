@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from muse_btc.alerts import change_alert, publish_alert
 from muse_btc.api import create_app
-from muse_btc.models import Signal, SignalKind
+from muse_btc.models import Signal, SignalEvaluation, SignalKind
 from muse_btc.providers import Providers
 from muse_btc.storage import Store
 
@@ -33,6 +33,12 @@ def signal_for(snap, at, *, rule="test-rule", kind=SignalKind.ENTRY_CANDIDATE):
         reference_price=snap.price,
         expires_at=at + timedelta(hours=4),
         horizon_seconds=3600,
+        evaluation=SignalEvaluation(
+            metric="RISK_DIRECTION" if kind == SignalKind.RISK else "LONG_RETURN",
+            horizons_seconds=(3600,),
+            primary_horizon_seconds=3600,
+            rationale="Explicit test-fixture observation window",
+        ),
     )
 
 

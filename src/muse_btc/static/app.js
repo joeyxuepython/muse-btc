@@ -161,7 +161,7 @@ function renderSignals() {
   $("#signals").innerHTML = items
     .map(
       (s) =>
-        `<article class="signal-row" data-signal="${escapeHtml(s.id)}" tabindex="0"><div class="signal-top">${tag(kinds[s.kind] || s.kind, s.kind === "RISK" ? "danger" : ["WATCH", "INVALIDATED"].includes(s.kind) ? "warning" : "")}<strong>${escapeHtml(s.symbol)}</strong><time>${time(s.emitted_at)}</time></div><p>${escapeHtml(s.title)}</p><div class="signal-meta"><span>${escapeHtml(states[s.state] || s.state)}</span><span>${escapeHtml(signalScore(s))}</span><span>${s.horizon_seconds / 60}m 观察窗</span><span>${escapeHtml(s.rule_id)}</span></div></article>`,
+        `<article class="signal-row" data-signal="${escapeHtml(s.id)}" tabindex="0"><div class="signal-top">${tag(kinds[s.kind] || s.kind, s.kind === "RISK" ? "danger" : ["WATCH", "INVALIDATED"].includes(s.kind) ? "warning" : "")}<strong>${escapeHtml(s.symbol)}</strong><time>${time(s.emitted_at)}</time></div><p>${escapeHtml(s.title)}</p><div class="signal-meta"><span>${escapeHtml(states[s.state] || s.state)}</span><span>${escapeHtml(signalScore(s))}</span><span>${(s.evaluation?.primary_horizon_seconds ?? s.horizon_seconds) / 60}m ${s.evaluation ? "主评估期" : "历史观察窗"}</span><span>${escapeHtml(s.rule_id)}</span></div></article>`,
     )
     .join("");
   $("#empty-signals").hidden = items.length > 0;
@@ -312,6 +312,25 @@ async function showAsset(id) {
     notice(e.message);
   }
 }
+function evaluationDetail(s) {
+  if (!s.evaluation) return "<p>历史记录仅声明观察窗，未提前声明持有期和主指标。</p>";
+  const p = s.evaluation;
+  const names = {LONG_RETURN:"价格表现", RISK_DIRECTION:"下跌方向及风险路径", VOLATILITY:"波动范围及绝对变化"};
+  const auxiliary = p.horizons_seconds.filter(h => h !== p.primary_horizon_seconds);
+  return `<h3>提前声明的评估</h3><p>${escapeHtml(names[p.metric] || p.metric)} · 主评估期 ${p.primary_horizon_seconds / 60}m · 辅助观察 ${auxiliary.length ? auxiliary.map(h => `${h / 60}m`).join(" / ") : "无"}</p><p>${escapeHtml(p.rationale)}</p><p class="muted">评估到期只记录表现；五分钟负收益不会自动使信号失效。有效期和失效条件独立判断。</p>`;
+}
+function outcomeDetail(o, s) {
+  const prefix = `${o.horizon_seconds / 60}m · ${!s.evaluation ? "历史观察" : o.horizon_seconds === s.evaluation.primary_horizon_seconds ? "主评估" : "辅助观察"}`;
+  if (s.evaluation && (o.evaluation_policy_id !== s.evaluation_policy_id || o.evaluation_metric !== s.evaluation.metric || !s.evaluation.horizons_seconds.includes(o.horizon_seconds))) {
+    return `${prefix} · 口径未匹配声明，仅保留原始记录：价格变化 ${pct(o.return_pct)}`;
+  }
+  if (o.evaluation_metric === "RISK_DIRECTION") {
+    const flag = value => value == null ? "未记录" : value ? "是" : "否";
+    return `${prefix}：终点下跌 ${flag(o.risk_terminal_decline)}，窗口曾下跌 ${flag(o.risk_window_decline)}，最大采样跌幅 ${pct(o.risk_max_decline_pct)}，最大反向上涨 ${pct(o.risk_max_rebound_pct)}；不计算持仓收益`;
+  }
+  if (o.evaluation_metric === "VOLATILITY") return `${prefix}：采样范围 ${pct(o.observed_range_pct)}，终点绝对变化 ${pct(o.absolute_end_change_pct)}；不判断涨跌方向`;
+  return `${prefix}：价格变化 ${pct(o.return_pct)}，最大不利变化 ${pct(o.max_adverse_pct)}，${o.sample_count} 次采样`;
+}
 async function showSignal(id) {
   try {
     const { signal: s, outcomes } = await (
@@ -321,27 +340,40 @@ async function showSignal(id) {
     const list = (values) =>
       `<ul>${values.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>`;
     $("#detail-body").innerHTML =
-      `<p>${tag(kinds[s.kind])} ${tag(states[s.state] || s.state)} ${tag("规则观察期", "warning")}</p><div class="detail-grid"><div class="detail-item"><span>触发时价格</span><strong>${price(s.reference_price)}</strong></div><div class="detail-item"><span>失效参考位</span><strong>${price(s.invalidation_price)}</strong></div><div class="detail-item"><span>入场参考区间</span><strong>${s.entry_zone ? s.entry_zone.map(price).join(" — ") : "尚未满足入场条件"}</strong></div><div class="detail-item"><span>有效至 UTC+8</span><strong>${time(s.expires_at)}</strong></div></div>${decisionDetail(s.decision)}<h3>触发证据</h3>${list(s.evidence)}<h3>反向证据与限制</h3>${list(s.contradictions.length ? s.contradictions : ["规则尚未完成充分的样本外验证"])}<h3>失效条件</h3>${list(s.invalidation_conditions)}<h3>历史状态</h3>${list(s.events.map((e) => time(e.event_at) + " · " + (states[e.state] || e.state) + " · " + e.reason))}<h3>事后观察</h3>${outcomes.length ? list(outcomes.map((o) => `${o.horizon_seconds / 60}m：价格变化 ${pct(o.return_pct)}，最大不利变化 ${pct(o.max_adverse_pct)}，${o.sample_count} 次采样`)) : "<p>尚未到达观察时间窗，或缺少覆盖该时间窗的真实价格。</p>"}<p class="muted">规则 ${escapeHtml(s.rule_id)} / ${escapeHtml(s.rule_version)} · ${s.evidence_groups.map(escapeHtml).join(" + ")}</p><button class="button secondary" data-asset="${escapeHtml(s.asset_id)}">查看标的原始依据 ↗</button>`;
+      `<p>${tag(kinds[s.kind])} ${tag(states[s.state] || s.state)} ${tag("规则观察期", "warning")}</p><div class="detail-grid"><div class="detail-item"><span>触发时价格</span><strong>${price(s.reference_price)}</strong></div><div class="detail-item"><span>失效参考位</span><strong>${price(s.invalidation_price)}</strong></div><div class="detail-item"><span>入场参考区间</span><strong>${s.entry_zone ? s.entry_zone.map(price).join(" — ") : "尚未满足入场条件"}</strong></div><div class="detail-item"><span>有效至 UTC+8</span><strong>${time(s.expires_at)}</strong></div></div>${decisionDetail(s.decision)}${evaluationDetail(s)}<h3>触发证据</h3>${list(s.evidence)}<h3>反向证据与限制</h3>${list(s.contradictions.length ? s.contradictions : ["规则尚未完成充分的样本外验证"])}<h3>失效条件</h3>${list(s.invalidation_conditions)}<h3>历史状态</h3>${list(s.events.map((e) => time(e.event_at) + " · " + (states[e.state] || e.state) + " · " + e.reason))}<h3>事后观察</h3>${outcomes.length ? list(outcomes.map((o) => outcomeDetail(o, s))) : "<p>尚未到达观察时间窗，或缺少覆盖该时间窗的真实价格。</p>"}<p class="muted">规则 ${escapeHtml(s.rule_id)} / ${escapeHtml(s.rule_version)} · ${s.evidence_groups.map(escapeHtml).join(" + ")}</p><button class="button secondary" data-asset="${escapeHtml(s.asset_id)}">查看标的原始依据 ↗</button>`;
     if (!$("#detail").open) $("#detail").showModal();
   } catch (e) {
     notice(e.message);
   }
 }
+function validationTable(rows, metric, legacy = false) {
+  if (!rows.length) return "<p>暂无该类型的声明评估样本。</p>";
+  const probability = n => n == null ? "—" : `${(n * 100).toFixed(1)}%`;
+  const risk = metric === "RISK_DIRECTION", volatility = metric === "VOLATILITY";
+  const columns = risk ? ["终点下跌占比 / 95%区间", "窗口曾下跌占比", "最大采样跌幅 / 反向上涨"] : volatility ? ["平均采样范围", "平均终点绝对变化"] : ["平均价格变化", "扣成本 / 双倍成本", "正收益占比 / 95%区间"];
+  return `<div class="table-scroll"><table><thead><tr><th>规则 / 版本</th><th>类型 / 模块</th><th>期限 / 用途</th><th>测量 / 覆盖 / 去重</th><th>待到期 / 缺失 / 断档</th>${columns.map(c => `<th>${c}</th>`).join("")}<th>样本状态</th></tr></thead><tbody>${rows.map(row => {
+    const role = legacy ? "历史观察" : row.horizon_role === "PRIMARY" ? "主评估" : "辅助观察";
+    const stats = risk ? `<td>${probability(row.risk_terminal_decline_rate ?? row.down_move_rate)}<small>${row.risk_terminal_decline_rate_wilson_95?.map(probability).join(" — ") || "—"}</small></td><td>${probability(row.risk_window_decline_rate)}</td><td>${pct(row.risk_mean_max_decline_pct)} / ${pct(row.risk_mean_max_rebound_pct)}</td>` : volatility ? `<td>${pct(row.mean_observed_range_pct)}</td><td>${pct(row.mean_absolute_end_change_pct)}</td>` : `<td>${pct(row.mean_return_pct)}</td><td>${pct(row.mean_paper_net_return_pct)} / ${pct(row.mean_double_cost_return_pct)}</td><td>${probability(row.paper_positive_rate)}<small>${row.paper_positive_rate_wilson_95?.map(probability).join(" — ") || "—"}</small></td>`;
+    return `<tr><td>${escapeHtml(row.rule_id)}<small>${escapeHtml(row.rule_version || "旧版本")}</small></td><td>${escapeHtml(kinds[row.signal_kind] || row.signal_kind || "未知")} / ${escapeHtml(row.module || "未知")}</td><td>${row.horizon_seconds / 60}m · ${role}</td><td>${row.measured_count} / ${row.covered_count} / ${row.nonoverlapping_count ?? "—"}</td><td>${row.pending_count ?? 0} / ${row.missing_outcome_count ?? 0} / ${row.gapped_count ?? 0}</td>${stats}<td>${row.evaluation_status === "INSUFFICIENT_SAMPLES" ? "样本不足" : "仅描述统计"}</td></tr>`;
+  }).join("")}</tbody></table></div>`;
+}
 async function loadValidation() {
   try {
     const r = await (await api("/api/validation")).json();
-    const probability = n => n == null ? "—" : `${(n * 100).toFixed(1)}%`;
+    const current = r.version === "validation-v3" ? r.rules : [];
+    const legacy = r.version === "validation-v3" ? r.legacy_rules || [] : r.rules;
+    const metric = row => row.evaluation_metric || (row.signal_kind === "RISK" ? "RISK_DIRECTION" : "LONG_RETURN");
+    const tables = (rows, historical = false) => [
+      ["LONG_RETURN", "机会价格表现"], ["RISK_DIRECTION", "风险方向观察"], ["VOLATILITY", "波动背景观察"]
+    ].map(([key, title]) => {
+      const selected = rows.filter(row => metric(row) === key);
+      return selected.length ? `<h3>${title}</h3>${validationTable(selected, key, historical)}` : "";
+    }).join("");
     $("#validation-body").innerHTML =
-      `<div class="validation-summary"><div><strong>${r.signal_count}</strong><small>归档提醒</small></div><div><strong>${r.outcome_count}</strong><small>已测量时间窗</small></div></div>
-      <p>按规则版本、信号类型和模块分别评估。同币重叠窗口只取最早信号；以下是固定期限的事后观察。</p>
-      ${r.rules.length ? `<div class="table-scroll"><table><thead><tr><th>规则 / 版本</th><th>类型 / 模块</th><th>时间窗</th><th>测量 / 覆盖 / 去重</th><th>待到期 / 缺失 / 断档</th><th>平均价格变化</th><th>扣成本 / 双倍成本</th><th>正收益占比 / 95%区间</th><th>样本状态</th></tr></thead><tbody>${r.rules.map(row => `<tr>
-        <td>${escapeHtml(row.rule_id)}<small>${escapeHtml(row.rule_version || "旧版本")}</small></td>
-        <td>${escapeHtml(kinds[row.signal_kind] || row.signal_kind || "未知")} / ${escapeHtml(row.module || "未知")}</td>
-        <td>${row.horizon_seconds / 60}m</td><td>${row.measured_count} / ${row.covered_count} / ${row.nonoverlapping_count ?? "—"}</td>
-        <td>${row.pending_count ?? 0} / ${row.missing_outcome_count ?? 0} / ${row.gapped_count ?? 0}</td>
-        <td>${pct(row.mean_return_pct)}</td><td>${pct(row.mean_paper_net_return_pct)} / ${pct(row.mean_double_cost_return_pct)}</td>
-        <td>${probability(row.paper_positive_rate)}<small>${row.paper_positive_rate_wilson_95?.map(probability).join(" — ") || "—"}</small></td>
-        <td>${row.evaluation_status === "INSUFFICIENT_SAMPLES" ? "样本不足" : "仅描述统计"}</td></tr>`).join("")}</tbody></table></div>` : "<p>尚无真实信号样本，无法评估策略准确性。</p>"}
+      `<div class="validation-summary"><div><strong>${r.signal_count}</strong><small>归档提醒</small></div><div><strong>${r.outcome_count}</strong><small>已有测量窗</small></div></div>
+      <p>只评估提前声明的期限；主评估与辅助观察分开。五分钟的表现记录不会自动否定信号。风险告警观察下跌和反弹，不计算持仓收益。</p>
+      ${current.length ? tables(current) : "<p>尚无带完整评估声明的新信号；旧结果保留在下方。</p>"}
+      ${legacy.length ? `<details><summary>历史评估口径 · ${legacy.length} 组结果（与新声明分开）</summary><p>旧记录没有提前声明主指标和完整期限。这里保留已有结果，包括负收益，不作为新规则验收。</p>${tables(legacy, true)}</details>` : ""}
       <ul>${r.limitations.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>`;
   } catch (e) {
     notice(e.message);

@@ -2,12 +2,21 @@ from datetime import timedelta
 
 import pytest
 from conftest import snapshot
-from test_alert_delivery import signal_for
+from test_alert_delivery import signal_for as base_signal
 
+from muse_btc.evaluation_policy import evaluation_id
 from muse_btc.models import Outcome, SignalKind
 from muse_btc.performance import build_report
 from muse_btc.rules import evaluate, market_regime
 from muse_btc.validation import measure_signal
+
+
+def signal_for(*args, **kwargs):
+    signal = base_signal(*args, **kwargs)
+    signal.evaluation = signal.evaluation.model_copy(
+        update={"horizons_seconds": (300,), "primary_horizon_seconds": 300}
+    )
+    return signal
 
 
 def outcome(signal, *, change=1, horizon=300, gap=60):
@@ -26,6 +35,8 @@ def outcome(signal, *, change=1, horizon=300, gap=60):
         sample_count=5,
         max_observation_gap_seconds=gap,
         max_allowed_gap_seconds=300,
+        evaluation_policy_id=evaluation_id(signal.evaluation),
+        evaluation_metric=signal.evaluation.metric,
     )
 
 
@@ -38,7 +49,7 @@ def test_report_separates_types_versions_and_preserves_missing(settings, now):
     later_version.rule_version = "new-version"
     signals.append(later_version)
     report = build_report(
-        signals, [outcome(s) for s in signals[:3]], [300], settings, now + timedelta(seconds=600)
+        signals, [outcome(s) for s in signals[:3]], settings, now + timedelta(seconds=600)
     )
     assert len(report["rules"]) == 4
     for row in report["rules"]:
@@ -54,7 +65,7 @@ def test_overlap_selection_does_not_replace_missing_first_signal_with_winner(set
     first = signal_for(snapshot(now), now)
     second = signal_for(snapshot(now + timedelta(seconds=60)), now + timedelta(seconds=60))
     row = build_report(
-        [first, second], [outcome(second, change=10)], [300], settings, now + timedelta(seconds=600)
+        [first, second], [outcome(second, change=10)], settings, now + timedelta(seconds=600)
     )["rules"][0]
     assert row["covered_count"] == 1
     assert row["overlapping_count"] == 1
@@ -66,7 +77,7 @@ def test_overlap_selection_does_not_replace_missing_first_signal_with_winner(set
 def test_cost_stress_and_intervals_are_not_fake_certainty(settings, now):
     first = signal_for(snapshot(now), now)
     row = build_report(
-        [first], [outcome(first, change=0.4)], [300], settings, now + timedelta(seconds=600)
+        [first], [outcome(first, change=0.4)], settings, now + timedelta(seconds=600)
     )["rules"][0]
     assert row["mean_paper_net_return_pct"] == pytest.approx(0.1)
     assert row["mean_double_cost_return_pct"] == pytest.approx(-0.2)
@@ -77,15 +88,14 @@ def test_cost_stress_and_intervals_are_not_fake_certainty(settings, now):
 
 def test_archived_coverage_threshold_and_future_labels(settings, now):
     first = signal_for(snapshot(now), now)
+    first.evaluation = first.evaluation.model_copy(update={"horizons_seconds": (300, 900)})
     result = outcome(first, gap=200)
     settings.stale_seconds = 60
-    rows = build_report([first], [result], [300, 900], settings, now + timedelta(seconds=600))[
-        "rules"
-    ]
+    rows = build_report([first], [result], settings, now + timedelta(seconds=600))["rules"]
     assert rows[0]["covered_count"] == 1  # Uses the measurement's recorded threshold.
     assert rows[1]["pending_count"] == 1
     result.evaluated_at = now + timedelta(seconds=1200)
-    row = build_report([first], [result], [300], settings, now + timedelta(seconds=600))["rules"][0]
+    row = build_report([first], [result], settings, now + timedelta(seconds=600))["rules"][0]
     assert row["missing_outcome_count"] == 1
 
 
@@ -103,9 +113,7 @@ def test_market_cohorts_and_chronological_boundary_are_descriptive(settings, now
         }
         signals.append(s)
         outcomes.append(outcome(s, change=1 if i % 2 else -1))
-    row = build_report(signals, outcomes, [300], settings, now + timedelta(seconds=6000))["rules"][
-        0
-    ]
+    row = build_report(signals, outcomes, settings, now + timedelta(seconds=6000))["rules"][0]
     assert row["market_confirmation_cohorts"]["RESONANT"]["sample_count"] == 5
     assert row["market_confirmation_cohorts"]["NON_RESONANT"]["sample_count"] == 5
     assert row["chronological_diagnostic"]["later"]["sample_count"] == 2

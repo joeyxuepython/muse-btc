@@ -6,12 +6,11 @@ from .btc_intelligence import apply_btc_context
 from .config import Settings
 from .decisions import decide
 from .entry_quality import quality_contexts
+from .evaluation_policy import evaluation_id, signal_evaluation
 from .models import Outcome, Signal, SignalKind, Snapshot, utc_now
 from .performance import build_report
 from .rules import RULE_VERSION, market_regime, quote_usable
 from .storage import Store
-
-HORIZONS = (300, 900, 3600, 14400, 86400, 259200, 604800, 1209600, 2592000)
 
 
 def observed_path(history, start, end, settings):
@@ -35,6 +34,9 @@ def measure_signal(
     recorded_settings=False,
     history=None,
 ) -> Outcome | None:
+    plan = signal_evaluation(signal)
+    if plan is None or horizon not in plan.horizons_seconds:
+        raise ValueError("Horizon is not declared by this signal's evaluation plan")
     target = signal.emitted_at + timedelta(seconds=horizon)
     if target > now:
         return None
@@ -68,7 +70,11 @@ def measure_signal(
         default=0,
     )
     btc_return = None
-    baseline = store.snapshot(signal.btc_snapshot_id) if signal.btc_snapshot_id else None
+    baseline = (
+        store.snapshot(signal.btc_snapshot_id)
+        if signal.btc_snapshot_id and plan.metric == "LONG_RETURN"
+        else None
+    )
     if baseline and quote_usable(baseline, signal.emitted_at, settings):
         btc_history = store.quote_range(target, end_limit, "binance:BTCUSDT")
         btc_end = next(
@@ -84,7 +90,8 @@ def measure_signal(
         )
         if btc_end:
             btc_return = (btc_end.price / baseline.price - 1) * 100
-    cost = 2 * (settings.fee_bps_each_way + settings.slippage_bps_each_way)
+    entry = signal.kind == SignalKind.ENTRY_CANDIDATE and plan.metric == "LONG_RETURN"
+    cost = 2 * (settings.fee_bps_each_way + settings.slippage_bps_each_way) if entry else None
     raw_return = (end.price / signal.reference_price - 1) * 100
     return Outcome(
         signal_id=signal.id,
@@ -97,9 +104,7 @@ def measure_signal(
         excess_return_pct=raw_return - btc_return if btc_return is not None else None,
         max_favorable_pct=max(returns),
         max_adverse_pct=min(returns),
-        paper_net_return_pct=raw_return - cost / 100
-        if signal.kind == SignalKind.ENTRY_CANDIDATE
-        else None,
+        paper_net_return_pct=raw_return - cost / 100 if entry else None,
         round_trip_cost_bps=cost,
         sample_count=len(measured),
         max_observation_gap_seconds=max_gap,
@@ -111,6 +116,14 @@ def measure_signal(
         time_to_mae_seconds=(
             stamps[returns.index(min(returns))] - signal.emitted_at
         ).total_seconds(),
+        evaluation_policy_id=evaluation_id(plan),
+        evaluation_metric=plan.metric,
+        risk_terminal_decline=raw_return < 0 if plan.metric == "RISK_DIRECTION" else None,
+        risk_window_decline=min(returns) < 0 if plan.metric == "RISK_DIRECTION" else None,
+        risk_max_decline_pct=max(0, -min(returns)) if plan.metric == "RISK_DIRECTION" else None,
+        risk_max_rebound_pct=max(returns) if plan.metric == "RISK_DIRECTION" else None,
+        observed_range_pct=max(returns) - min(returns) if plan.metric == "VOLATILITY" else None,
+        absolute_end_change_pct=abs(raw_return) if plan.metric == "VOLATILITY" else None,
     )
 
 
@@ -132,6 +145,7 @@ def validation_batch(store, now, settings, *, limit=None, budget_seconds=None, s
         "completed": 0,
         "missing": 0,
         "deferred": 0,
+        "retired": 0,
         "budget_exhausted": False,
     }
     for batch in by_signal.values():
@@ -139,6 +153,15 @@ def validation_batch(store, now, settings, *, limit=None, budget_seconds=None, s
             result["budget_exhausted"] = True
             break
         signal = Signal.model_validate_json(batch[0]["payload"])
+        plan = signal_evaluation(signal)
+        allowed = plan.horizons_seconds if plan else ()
+        for job in batch:
+            if job["horizon_seconds"] not in allowed:
+                store.retire_validation(signal.id, job["horizon_seconds"])
+                result["retired"] += 1
+        batch = [j for j in batch if j["horizon_seconds"] in allowed]
+        if not batch:
+            continue
         recorded = store.decision_config(signal.emitted_at)
         config = settings.model_copy(update=recorded) if recorded else settings
         tolerance = max(config.poll_seconds * 2, 60)
@@ -192,9 +215,7 @@ def validate_pending(
 
 def validation_report(store: Store, settings: Settings, now: datetime | None = None) -> dict:
     now = now or utc_now()
-    report = build_report(
-        store.signals(limit=100000, as_of=now), store.outcomes(), HORIZONS, settings, now
-    )
+    report = build_report(store.signals(limit=100000, as_of=now), store.outcomes(), settings, now)
     report["validation_queue"] = store.validation_queue(now)
     return report
 
@@ -249,7 +270,7 @@ def replay(store: Store, start: datetime, end: datetime, settings: Settings) -> 
     outcomes = [
         outcome
         for signal in signals
-        for horizon in HORIZONS
+        for horizon in signal_evaluation(signal).horizons_seconds
         if (outcome := measure_signal(store, signal, horizon, end, settings))
     ]
     return {

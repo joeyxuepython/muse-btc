@@ -230,6 +230,12 @@ def test_grouped_decisions_keep_members_and_deduplicate_common_context(store, se
     assert len(group["member_notification_ids"]) == len(group["decision_explanations"]) == 2
     assert group["message_zh"].count("BTC 背景：") == 1
     assert group["message_zh"].count("机会排行只用于排序") == 1
+    plans = {p["rule_id"]: p["evaluation"] for p in group["evaluation_plans"]}
+    assert plans["pre-pump-fusion"]["primary_horizon_seconds"] == 900
+    assert plans["spot-led-momentum"]["primary_horizon_seconds"] == 3600
+    assert "主评估 15 分钟" in group["message_zh"]
+    assert "主评估 60 分钟" in group["message_zh"]
+    assert group["message_zh"].count("不是持仓到期或卖出指令") == 1
     assert group["independent_strategy_count"] is None
     assert "pre-pump:" in str(group["decision_explanations"])
 
