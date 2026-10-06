@@ -5,7 +5,7 @@
 ## 默认生效的检查
 
 - `enable_entry_quality=true`：现货动量与 pre-pump 入场候选统一经过检查。缺项降为 WATCH/SETUP，不进入机会发送组。
-- 至少两次盘口和已收盘 K 线的源时点各相隔 60 秒，且均在新鲜度窗口内。中间若出现不支持的观测，也不能跳过它挑选更早的有利记录。缓存复用、同一数据重复采集不能确认自己。
+- 至少两次盘口和已收盘 K 线的源时点各相隔 60 秒。当前输入仍须新鲜，历史 anchor 在采集时须新鲜且对齐，默认最多回看 1800 秒；中间若出现不支持的观测，也不能跳过它挑选更早的有利记录。缓存复用、同一数据重复采集不能确认自己。断档恢复、参数和版本区别见[历史锚点指引](entry-anchor-recovery.md)。
 - 每次确认需要有效实际成交买入占比；默认至少 58%。15 分钟成交窗口重叠，因此这不是独立样本或独立策略投票。
 - 正负 0.1% 内已观测到的双边金额分别至少 10,000 USDT。部分盘口也可证明这个金额下限，但必须标为 OBSERVED_LOWER_BOUND，不能计算完整范围的买卖盘比例或市场共振。它是可配置的观察质量下限，不是针对用户资金量的下单或滑点保证。
 - 当前 5 分钟、15 分钟涨幅均不能超过默认 3% 追涨限制。保留 pre-pump 原有首次发现后确认时限和追涨限制。
@@ -49,9 +49,9 @@
 ## Muse 更新步骤
 
 1. 使用 [云端运行指引](cloud-run.md)备份数据库，保留云端 `.env`、邮件连接和游标。待本 PR 合并后更新 main 并重新安装，按既有方式重启；不要覆盖云端临时修改。
-2. `/health` 应出现 `entry_quality_version=entry-quality-v1`。检查 `.env` 中新增字段，默认参数见 [示例](../.env.example)。保持 `MUSE_MARKET_CONFIRMATION_MODE=observe`。
+2. `/health` 应出现 `entry_quality_version=entry-quality-v2`。检查 `.env` 中新增字段，默认参数见 [示例](../.env.example)。保持 `MUSE_MARKET_CONFIRMATION_MODE=observe`。
 3. 只读诊断：`.venv/bin/muse quality-report` 或认证访问 `GET /api/quality`。核对本币源时点、确认快照、盘口完整性、缺项、有效市场覆盖。首次启动/历史不足时 WAIT/UNKNOWN 正常。
-4. 等原有行情采集产生至少两个有效新观测，检查机会的 `decision.entry_quality` 和 `decision.market_confirmation`。保留原本的批次拉取、发送前复核、`message_zh` 正文和 SENT/SKIPPED 回执流程。
+4. 检查机会的 `decision.entry_quality` 和 `decision.market_confirmation`。符合历史锚点条件的旧观测可以复用；没有合格 anchor 时仍须积累至少两个不同源时点的有效观测。保留原本的批次拉取、发送前复核、`message_zh` 正文和 SENT/SKIPPED 回执流程。
 5. 使用 `.venv/bin/muse validate` 保存评估报告；反馈 `rule_version`、非重叠样本数、缺失/断档、扣成本及双倍成本结果、共振分组和较晚时间块表现。样本不足时报告不足，不汇报“高准确率”。
 6. 验收反馈还需包含代码提交号、主采集周期耗时、盘口范围完整率、机会被各检查拦截的数量和实际邮件样例。没有邮件回执不能声称送达。
 

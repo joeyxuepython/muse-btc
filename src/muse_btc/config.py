@@ -1,7 +1,7 @@
 import math
 from pathlib import Path
 
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_THRESHOLDS = {
@@ -60,7 +60,8 @@ class Settings(BaseSettings):
     pre_pump_confirmation_seconds: int = Field(default=300, ge=60, le=900)
     pre_pump_max_chase_pct: float = Field(default=3, gt=0, le=20)
     enable_entry_quality: bool = True
-    entry_confirmation_seconds: int = Field(default=60, ge=30, le=300)
+    entry_confirmation_seconds: int = Field(default=60, ge=60, le=300)
+    entry_anchor_max_age_seconds: int = Field(default=1800, ge=60, le=3600)
     entry_min_depth_usdt: float = Field(default=10000, gt=0)
     entry_max_chase_pct: float = Field(default=3, gt=0, le=20)
     market_confirmation_mode: str = Field(default="observe", pattern=r"^(observe|require)$")
@@ -167,6 +168,12 @@ class Settings(BaseSettings):
         if set(values) - {"macro", "events", "onchain", "options", "research", "social"}:
             raise ValueError("Unsupported background scope")
         return list(dict.fromkeys(values))
+
+    @model_validator(mode="after")
+    def valid_entry_anchor_window(self):
+        if self.entry_anchor_max_age_seconds < self.entry_confirmation_seconds:
+            raise ValueError("Entry anchor maximum age must span the confirmation minimum")
+        return self
 
     @field_validator("macro_series")
     @classmethod
