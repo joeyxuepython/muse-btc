@@ -14,11 +14,12 @@ from statistics import median
 from .models import Module, SignalKind
 from .rules import component_usable, usable
 
-VERSION = "entry-quality-v1"
+VERSION = "entry-quality-v2"
 ENTRY_RULES = {"spot-led-momentum", "pre-pump-fusion"}
 POLICY_FIELDS = (
     "enable_entry_quality",
     "entry_confirmation_seconds",
+    "entry_anchor_max_age_seconds",
     "entry_min_depth_usdt",
     "entry_max_chase_pct",
     "market_confirmation_mode",
@@ -33,7 +34,7 @@ POLICY_FIELDS = (
 CHECK_NAMES = {
     "fresh_components": "盘口、成交与报价新鲜且对齐",
     "depth_floor": "双边已观测近端盘口金额满足下限",
-    "persistent_demand": "连续新观测支持现货买入",
+    "persistent_demand": "已归档新老观测支持现货买入",
     "not_extended": "短期涨幅未超过追涨上限",
 }
 
@@ -68,7 +69,7 @@ def inspect(snapshot, now, settings):
 
 
 def observation_window(snapshot, history, settings):
-    """Latest consecutive observations, including intervening adverse observations.
+    """Latest archived observations, including intervening adverse observations.
 
     A cached book/candle cannot confirm itself. Choose the most recent anchor
     spanning the minimum time; never search past a failed observation for a win.
@@ -77,6 +78,8 @@ def observation_window(snapshot, history, settings):
     candle = snapshot.component_times.get("candles")
     if not book or not candle:
         return []
+    # Legacy archived configs can contain 30s; v2's invariant also applies to replay.
+    minimum = max(60, settings.entry_confirmation_seconds)
     window = [snapshot]
     for old in reversed(history):
         if (
@@ -90,12 +93,12 @@ def observation_window(snapshot, history, settings):
         if (
             old_book is not None
             and old_candle is not None
-            and settings.entry_confirmation_seconds
+            and minimum
             <= (book - old_book).total_seconds()
-            <= settings.stale_seconds
-            and settings.entry_confirmation_seconds
+            <= settings.entry_anchor_max_age_seconds
+            and minimum
             <= (candle - old_candle).total_seconds()
-            <= settings.stale_seconds
+            <= settings.entry_anchor_max_age_seconds
         ):
             return window
     return []
@@ -104,15 +107,22 @@ def observation_window(snapshot, history, settings):
 def asset_quality(snapshot, history, now, settings):
     current = inspect(snapshot, now, settings)
     window = observation_window(snapshot, history, settings)
-    ready = bool(window) and all(inspect(s, now, settings)["fresh_components"] for s in window)
+    # Historical evidence must have been fresh at receipt; only the newest book
+    # authorizes a current decision. Reopening the DB does not reset this window.
+    inspected = [current] + [inspect(s, s.available_at, settings) for s in window[1:]]
+    ready = bool(window) and all(item["fresh_components"] for item in inspected)
     persistent = ready and all(
-        inspect(s, now, settings)["depth_floor"]
+        item["depth_floor"]
         and s.features.spot_taker_buy_ratio is not None
         and s.features.spot_taker_buy_ratio >= settings.rule_thresholds["spot_buy_ratio"]
-        for s in window
+        for s, item in zip(window, inspected, strict=True)
     )
+    # Entry anchors may bridge outages; withdrawal keeps the existing requirement
+    # for fresh adverse observations, rather than revoking from historical lows.
     withdrawn = ready and all(
-        s.features.spot_taker_buy_ratio is not None and s.features.spot_taker_buy_ratio < 0.45
+        inspect(s, now, settings)["fresh_components"]
+        and s.features.spot_taker_buy_ratio is not None
+        and s.features.spot_taker_buy_ratio < 0.45
         for s in window
     )
     returns = (snapshot.features.return_5m_pct, snapshot.features.return_15m_pct)
@@ -122,8 +132,8 @@ def asset_quality(snapshot, history, now, settings):
         not_extended=all(v is not None and v <= settings.entry_max_chase_pct for v in returns),
     )
     # The basket needs comparable complete books and actual buy flow, not just fewer asks.
-    comparable = ready and all(inspect(s, now, settings)["complete_depth"] for s in window)
-    previous = inspect(window[-1], now, settings) if comparable else None
+    comparable = ready and all(item["complete_depth"] for item in inspected)
+    previous = inspected[-1] if comparable else None
     supported = bool(
         comparable
         and persistent
@@ -151,22 +161,47 @@ def asset_quality(snapshot, history, now, settings):
         details.append("已观测双边近端盘口金额低于下限")
     if not window:
         failures.append("CONFIRMATION_OBSERVATIONS_INSUFFICIENT")
-        details.append("新鲜度窗口内不足两次不同源时点的有效观测")
+        details.append("历史锚点窗口内不足两次不同源时点的有效观测")
     elif not ready:
         failures.append("CONFIRMATION_INPUTS_INVALID")
-        details.append("确认窗口包含过期、未对齐或无效输入")
+        details.append("当前输入过期，或历史观测在采集时已过期、未对齐或无效")
     elif any(s.features.spot_taker_buy_ratio is None for s in window):
         failures.append("TAKER_BUY_INPUTS_MISSING")
         details.append("连续观测中的主动买入占比缺失，无法判断买入支撑")
     elif not persistent:
         failures.append("CONFIRMED_FLOW_OR_DEPTH_INSUFFICIENT")
-        details.append("有效连续观测的买入占比或盘口金额未满足要求")
+        details.append("已有观测的买入占比或盘口金额未满足要求")
     if any(v is None for v in returns):
         failures.append("CHASE_INPUTS_MISSING")
         details.append("追涨检查所需涨幅缺失")
     elif not checks["not_extended"]:
         failures.append("CHASE_LIMIT_EXCEEDED")
         details.append("短期涨幅超过追涨上限")
+    max_gap = max(
+        (
+            (new.available_at - old.available_at).total_seconds()
+            for new, old in zip(window, window[1:], strict=False)
+        ),
+        default=0,
+    )
+    component_gaps = {
+        component: max(
+            (
+                abs(
+                    (
+                        new.component_times[component] - old.component_times[component]
+                    ).total_seconds()
+                )
+                for new, old in zip(window, window[1:], strict=False)
+                if new.component_times.get(component) is not None
+                and old.component_times.get(component) is not None
+            ),
+            default=0,
+        )
+        for component in ("book", "candles")
+    }
+    gapped = bool(window) and max(max_gap, *component_gaps.values()) > settings.stale_seconds
+    anchor = window[-1] if window else None
     return {
         "version": VERSION,
         "policy_id": hashlib.sha256(
@@ -190,6 +225,19 @@ def asset_quality(snapshot, history, now, settings):
         if snapshot.component_times.get("candles")
         else None,
         "maximum_age_seconds": settings.stale_seconds,
+        "anchor_max_age_seconds": settings.entry_anchor_max_age_seconds,
+        "minimum_component_separation_seconds": max(60, settings.entry_confirmation_seconds),
+        "anchor_snapshot_id": anchor.id if anchor else None,
+        "anchor_age_seconds": (now - anchor.available_at).total_seconds() if anchor else None,
+        "max_observation_gap_seconds": max_gap if window else None,
+        "max_component_gap_seconds": component_gaps if window else None,
+        "has_observation_gap": gapped,
+        "observation_continuity": "GAPPED"
+        if gapped
+        else "WITHIN_FRESHNESS_WINDOW"
+        if window
+        else "UNCONFIRMED",
+        "limitations": ["历史锚点只证明已有观测支持；采样间及停机期间的变化未被完整观察"],
         "snapshot_ids": [s.id for s in window] or [snapshot.id],
         "window_start": window[-1].available_at.isoformat() if window else None,
         "book_time": snapshot.component_times.get("book").isoformat()
@@ -227,7 +275,9 @@ def quality_contexts(store, now, settings, snapshots=()):
         if s.module != Module.MEME and (s.decision_at is None or s.decision_at <= now)
     }
     history = defaultdict(list)
-    for s in store.snapshot_range(now - timedelta(seconds=settings.stale_seconds), now):
+    for s in store.snapshot_range(
+        now - timedelta(seconds=settings.entry_anchor_max_age_seconds), now
+    ):
         if s.decision_at is None or s.decision_at <= now:
             history[s.asset_id].append(s)
     qualities = {k: asset_quality(s, history[k], now, settings) for k, s in latest.items()}
@@ -300,10 +350,14 @@ def quality_contexts(store, now, settings, snapshots=()):
             "excluded_target": target,
             "missing_assets": sorted(peers - valid.keys()),
             "peer_snapshot_ids": {k: v["snapshot_ids"] for k, v in valid.items()},
+            "peer_max_observation_gap_seconds": {
+                k: v["max_observation_gap_seconds"] for k, v in valid.items()
+            },
             "limitations": [
                 "等权覆盖样本，非全市场、非市值加权 LIQ；阈值尚待样本外验证",
                 "盘口可撤单，成交窗口重叠；共振不代表独立证据或盈利概率",
                 "价格移动会改变范围内档位；盘口金额变化不能等同净资金流入",
+                "历史锚点可跨断档，各币观察跨度可能不同，不证明连续同期买盘增强",
             ],
         }
         results[target] = {"entry_quality": quality, "market_confirmation": market}

@@ -234,6 +234,14 @@ def replay(store: Store, start: datetime, end: datetime, settings: Settings) -> 
     # Reproduce the collection barrier: all evidence is available before decisions.
     for as_of, group in groupby(archived, key=lambda s: s.decision_at or s.available_at):
         recorded = store.decision_config(as_of)
+        if recorded and "entry_anchor_max_age_seconds" not in recorded:
+            # Older archives used stale_seconds as their anchor limit. Never
+            # silently substitute today's extended window into those settings.
+            recorded = recorded | {
+                "entry_anchor_max_age_seconds": recorded.get(
+                    "stale_seconds", settings.stale_seconds
+                )
+            }
         config = settings.model_copy(update=recorded) if recorded else settings
         legacy_config_batches += int(recorded is None)
         batch = []

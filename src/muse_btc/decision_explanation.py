@@ -296,6 +296,15 @@ def explanation_lines(rows):
                 + f"；往返成本假设 {quality['round_trip_cost_bps']:g} bps"
                 + f"；短期追涨上限 {quality['max_chase_pct']:g}%。"
             )
+            if quality.get("anchor_age_seconds") is not None:
+                gaps = quality["max_component_gap_seconds"]
+                add(
+                    f"确认依据：历史锚点距今 {quality['anchor_age_seconds']:g} 秒；"
+                    f"最大观测间隔 {quality['max_observation_gap_seconds']:g} 秒；"
+                    f"盘口/K 线最大源间隔 {gaps['book']:g}/{gaps['candles']:g} 秒。"
+                )
+            if quality.get("has_observation_gap"):
+                add("确认样本存在断档；已有观测支持入场，不代表停机期间买盘持续成立。")
         market = d.get("market_confirmation", {})
         if market:
             breadth = market.get("support_breadth_pct")

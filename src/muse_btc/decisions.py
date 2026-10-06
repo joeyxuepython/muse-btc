@@ -31,6 +31,7 @@ DECISION_FIELDS = (
     "btc_options_refresh_seconds",
     "enable_entry_quality",
     "entry_confirmation_seconds",
+    "entry_anchor_max_age_seconds",
     "entry_min_depth_usdt",
     "entry_max_chase_pct",
     "market_confirmation_mode",
