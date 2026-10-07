@@ -1,5 +1,7 @@
 # MUSE · 加密市场研判与 Web 预警
 
+[最新离线研究与 Muse 验证指引：BTC 突破过滤](docs/breakout-filter-research.md)。Codex 开发，Muse 云端复跑；研究结果不自动接入交易信号。
+
 按[最新 V4 计划](docs/requirements/v4-latest-plan.md)开发：**BTC、ETH 独立监控，加 100 个动态 USDT 山寨币，共 102 个现货标的**。币安提供现货，OKX 提供合约。Phase 1 已实现，V0.2 增加 Phase 2–6 可运行框架；真实来源、凭据、历史样本和后续适配需云端验收。Telegram 已取消。
 
 云端无响应问题的修复与更新步骤见[采集响应性说明](docs/collector-freeze-fix.md)，包括保护 Muse 临时修改、重新安装、健康探针和验收。

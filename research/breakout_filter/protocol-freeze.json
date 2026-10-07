@@ -1,0 +1,5 @@
+{
+  "frozen_at_utc": "2026-10-07T11:12:22.127253+00:00",
+  "protocol_sha256": "fe4b4e39388cd006f525bd0836496b501cb3b024b187f7929b36d3a42ac3935c",
+  "stage": "Before implementing or running filter returns; original baseline history already known."
+}

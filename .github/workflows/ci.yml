@@ -18,3 +18,10 @@ jobs:
         env:
           UV_CACHE_DIR: /tmp/muse-uv-cache
       - run: bash scripts/check.sh
+      - name: Isolated research checks (no market download)
+        run: |
+          .venv/bin/ruff check research/breakout_filter
+          .venv/bin/ruff format --check research/breakout_filter
+          cd research/breakout_filter
+          uv sync --locked
+          uv run --locked python -m unittest discover -v

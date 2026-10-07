@@ -1,0 +1,54 @@
+{
+  "study_id": "btc-breakout-filter-v1-20261007",
+  "status": "exploratory_predeclared_no_live_promotion",
+  "hypothesis": "Filtering marginal SMA200 entries may reduce whipsaw losses without losing too much trend profit.",
+  "baseline": "Prior completed daily close > SMA200 including that close. Long spot BTC or cash. Evaluate at UTC midnight, execute at 01:00 hourly open proxy.",
+  "filter": "At the start of each baseline exposure episode ONLY, accept iff previous close - SMA200 > 0.5 * ATR14. ATR14 is the arithmetic mean of the latest 14 true ranges, using prior close for each. If rejected, stay flat for the ENTIRE baseline episode; no delayed entry. Exit unchanged when close <= SMA200.",
+  "sma_days": 200,
+  "atr_days": 14,
+  "atr_multiple": 0.5,
+  "parameter_trials": 1,
+  "split_policy": "Each split starts in cash; if already above SMA200 at start, treat as boundary entry and flag it. Terminal exits are administrative. Never carry selected state across splits.",
+  "splits": {
+    "development": [
+      "2018-04-01",
+      "2023-01-01"
+    ],
+    "validation": [
+      "2023-01-01",
+      "2025-01-01"
+    ],
+    "historical_test_already_seen": [
+      "2025-01-01",
+      "2026-10-06"
+    ]
+  },
+  "annual_walk_forward_diagnostics": "2023, 2024, 2025 and 2026 partial year; no fitting or tuning in any fold. Reset to cash per fold. These are dependent descriptive views, not extra independent tests.",
+  "fees_bps_per_side": 10,
+  "slippage_bps_per_side": 5,
+  "cost_multipliers": [
+    1,
+    2,
+    4
+  ],
+  "random_control": "Uniform random subsets of baseline episodes, retaining EXACTLY as many episodes as filtered strategy in each split. 2000 seeded draws with replacement across subsets; archive selected episode IDs. Same entry/exit and costs. Holding duration/exposure NOT matched; diagnostic, not causal proof.",
+  "random_draws": 2000,
+  "seed": 20261007,
+  "uncertainty": "Paired circular moving-block bootstrap, 30-day blocks, 5000 draws, filtered-minus-baseline daily Sharpe. Serial dependence and small sample remain limitations.",
+  "decision": "RESEARCH_ONLY always. Suggest prospective paper consideration only if historical test base and double cost CAGR > 0; all main splits filtered Sharpe > baseline; historical test drawdown no worse than baseline; primary CI lower > 0; matched-count random p <= 0.05; historical test >=20 natural completed accepted episodes. Any sample shortfall -> INSUFFICIENT_EVIDENCE; otherwise failure -> STOP_THIS_HYPOTHESIS. No auto activation.",
+  "limitations": [
+    "All historical data already examined in SMA200 v1; no untouched holdout claim.",
+    "Fixed 0.5 ATR is a research choice, not an optimized or proven threshold.",
+    "Hourly open references are not executable fill guarantees. Costs, min notional and intraday risk limitations inherited from v1.",
+    "No Jev, liquidation data, production DB, alerts, collector or scheduler changes."
+  ],
+  "source_protocol_sha256": "2a620a3f208f5fff52da8570249d666b45ba8d989877bb84726ff1dd26d49e6a",
+  "source_manifest_sha256": "c5b95e9e42a1bc3d41c238dbb4dc3f2fdcf8682e366449a4d0e311c9a5528c9d",
+  "source_archive_sha256": "1485da973dd749b761a801ebca0f2280e6b8b0276d3df07333da1c0fd630b130",
+  "source_amendments": {
+    "amendment-A1.json": "41328094473555a37da2b087dd25e401132b31daeb76e807ece4d51c7b926d07",
+    "amendment-A2.json": "0f7fef60c720e70319bb906a7d3098c7e0e0d4532f35ae137781dc5ea2936647"
+  },
+  "baseline_provenance": "Copied functions from isolated btc-trend-research-20261007/research.py through shift_control; original main omitted.",
+  "source_engine_sha256": "c853de553c4e9c43df05365f203c6430fe0685cc7ac80040ed1d3e9f9d921104"
+}

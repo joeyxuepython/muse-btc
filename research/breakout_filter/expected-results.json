@@ -1,0 +1,2210 @@
+{
+  "study_id": "btc-breakout-filter-v1-20261007",
+  "decision": {
+    "verdict": "INSUFFICIENT_EVIDENCE",
+    "gates": {
+      "positive_base_and_double_cagr": false,
+      "all_main_splits_sharpe_improved": false,
+      "drawdown_no_worse": true,
+      "bootstrap_lower_positive": false,
+      "random_p_at_most_005": false,
+      "natural_completed_episodes_at_least_20": false
+    },
+    "production_authorized": false,
+    "unseen_holdout": false,
+    "status": "RESEARCH_ONLY"
+  },
+  "btc_cash_weight_from_development_baseline": 0.6428690477907086,
+  "splits": {
+    "development": {
+      "start": "2018-04-01",
+      "end": "2023-01-01",
+      "costs": {
+        "1": {
+          "baseline": {
+            "days": 1736,
+            "total_return": 2.2595273295310125,
+            "cagr": 0.2820133092593635,
+            "annualized_volatility": 0.47569161989319886,
+            "sharpe_cash_yield_zero": 0.7601119423580401,
+            "max_drawdown_daily_sampled": -0.6512171314507271,
+            "longest_underwater_days_including_unrecovered": 625,
+            "buy_events": 14,
+            "total_fees_usdt": 907.5610986814871,
+            "total_slippage_usdt": 453.7865384959289,
+            "ending_equity_usdt": 32595.273295310126
+          },
+          "filtered": {
+            "days": 1736,
+            "total_return": 4.210714083205718,
+            "cagr": 0.4149142588856962,
+            "annualized_volatility": 0.4623485866786496,
+            "sharpe_cash_yield_zero": 0.9814127895632586,
+            "max_drawdown_daily_sampled": -0.4918061898587487,
+            "longest_underwater_days_including_unrecovered": 625,
+            "buy_events": 7,
+            "total_fees_usdt": 484.40875715911534,
+            "total_slippage_usdt": 242.2150870206968,
+            "ending_equity_usdt": 52107.14083205718
+          },
+          "buy_hold": {
+            "days": 1736,
+            "total_return": 1.3610389564581626,
+            "cagr": 0.19797078612148789,
+            "annualized_volatility": 0.7399510390614796,
+            "sharpe_cash_yield_zero": 0.6216422214137443,
+            "max_drawdown_daily_sampled": -0.7653002146344927,
+            "longest_underwater_days_including_unrecovered": 488,
+            "buy_events": 1,
+            "total_fees_usdt": 33.62403357817979,
+            "total_slippage_usdt": 16.81543199634571,
+            "ending_equity_usdt": 23610.389564581626
+          },
+          "btc_cash": {
+            "days": 1736,
+            "total_return": 1.333817503391412,
+            "cagr": 0.19505346738864793,
+            "annualized_volatility": 0.47567451442793174,
+            "sharpe_cash_yield_zero": 0.6147861870125313,
+            "max_drawdown_daily_sampled": -0.5867152174909613,
+            "longest_underwater_days_including_unrecovered": 418,
+            "buy_events": 840,
+            "total_fees_usdt": 264.9952226955864,
+            "total_slippage_usdt": 132.50104526560418,
+            "ending_equity_usdt": 23338.175033914118
+          }
+        },
+        "2": {
+          "baseline": {
+            "days": 1736,
+            "total_return": 2.1254620255153855,
+            "cagr": 0.27074212407135323,
+            "annualized_volatility": 0.4757678751179828,
+            "sharpe_cash_yield_zero": 0.7414975838812,
+            "max_drawdown_daily_sampled": -0.6610177823985077,
+            "longest_underwater_days_including_unrecovered": 625,
+            "buy_events": 14,
+            "total_fees_usdt": 1772.6458311406898,
+            "total_slippage_usdt": 886.3468291832052,
+            "ending_equity_usdt": 31254.620255153855
+          },
+          "filtered": {
+            "days": 1736,
+            "total_return": 4.1024298617094415,
+            "cagr": 0.408680716776632,
+            "annualized_volatility": 0.4623683708331011,
+            "sharpe_cash_yield_zero": 0.971831593378243,
+            "max_drawdown_daily_sampled": -0.4971152606265715,
+            "longest_underwater_days_including_unrecovered": 625,
+            "buy_events": 7,
+            "total_fees_usdt": 955.8689575387491,
+            "total_slippage_usdt": 477.97693691386195,
+            "ending_equity_usdt": 51024.29861709441
+          },
+          "buy_hold": {
+            "days": 1736,
+            "total_return": 1.3539664412890264,
+            "cagr": 0.19721539056667692,
+            "annualized_volatility": 0.7399551123292861,
+            "sharpe_cash_yield_zero": 0.6207893820140188,
+            "max_drawdown_daily_sampled": -0.7653002146344927,
+            "longest_underwater_days_including_unrecovered": 488,
+            "buy_events": 1,
+            "total_fees_usdt": 67.13375601845615,
+            "total_slippage_usdt": 33.58051838791193,
+            "ending_equity_usdt": 23539.664412890263
+          },
+          "btc_cash": {
+            "days": 1736,
+            "total_return": 1.2934420282318375,
+            "cagr": 0.19067654586153115,
+            "annualized_volatility": 0.47566013920890515,
+            "sharpe_cash_yield_zero": 0.6070761686445958,
+            "max_drawdown_daily_sampled": -0.5879906415208421,
+            "longest_underwater_days_including_unrecovered": 418,
+            "buy_events": 840,
+            "total_fees_usdt": 524.2577433207944,
+            "total_slippage_usdt": 262.1425924810008,
+            "ending_equity_usdt": 22934.420282318373
+          }
+        },
+        "4": {
+          "baseline": {
+            "days": 1736,
+            "total_return": 1.8736457862765423,
+            "cagr": 0.2484960482249552,
+            "annualized_volatility": 0.47600129425745014,
+            "sharpe_cash_yield_zero": 0.7042498631578092,
+            "max_drawdown_daily_sampled": -0.6798019369090653,
+            "longest_underwater_days_including_unrecovered": 625,
+            "buy_events": 14,
+            "total_fees_usdt": 3382.399666334848,
+            "total_slippage_usdt": 1691.2950737778337,
+            "ending_equity_usdt": 28736.457862765423
+          },
+          "filtered": {
+            "days": 1736,
+            "total_return": 3.8925643634556746,
+            "cagr": 0.39629583426010084,
+            "annualized_volatility": 0.4624502860402144,
+            "sharpe_cash_yield_zero": 0.9526272176357694,
+            "max_drawdown_daily_sampled": -0.5075694918755608,
+            "longest_underwater_days_including_unrecovered": 625,
+            "buy_events": 7,
+            "total_fees_usdt": 1861.129851246475,
+            "total_slippage_usdt": 930.7317956443632,
+            "ending_equity_usdt": 48925.64363455674
+          },
+          "buy_hold": {
+            "days": 1736,
+            "total_return": 1.3398848311452825,
+            "cagr": 0.1957060202099843,
+            "annualized_volatility": 0.7399670366442278,
+            "sharpe_cash_yield_zero": 0.619084383180724,
+            "max_drawdown_daily_sampled": -0.7653002146344927,
+            "longest_underwater_days_including_unrecovered": 488,
+            "buy_events": 1,
+            "total_fees_usdt": 133.8119158094475,
+            "total_slippage_usdt": 66.96035638705925,
+            "ending_equity_usdt": 23398.848311452824
+          },
+          "btc_cash": {
+            "days": 1736,
+            "total_return": 1.2147705374012001,
+            "cagr": 0.1819702909398342,
+            "annualized_volatility": 0.47563415758685124,
+            "sharpe_cash_yield_zero": 0.5916534955600476,
+            "max_drawdown_daily_sampled": -0.5905290012067514,
+            "longest_underwater_days_including_unrecovered": 418,
+            "buy_events": 840,
+            "total_fees_usdt": 1026.0112117268231,
+            "total_slippage_usdt": 513.0603529711675,
+            "ending_equity_usdt": 22147.705374012003
+          }
+        }
+      },
+      "rejected_opportunities": {
+        "count": 7,
+        "profitable_missed": 0,
+        "losing_avoided": 7,
+        "baseline_trade_returns": [
+          -0.08855260323101666,
+          -0.1003211223993149,
+          -0.0349381598541203,
+          -0.04358529843049008,
+          -0.021997066380429975,
+          -0.11903747312232738,
+          -0.040733517196316016
+        ],
+        "note": "Per-trade percentage outcomes, not additive portfolio PnL attribution"
+      },
+      "natural_completed_episodes": 7,
+      "random_control": {
+        "accepted_episodes": 7,
+        "baseline_episodes": 14,
+        "actual_sharpe": 0.9814127895632591,
+        "p_ge_actual": 0.05897051474262868,
+        "seed": 20261007,
+        "limitation": "Exact episode count, not matched holding duration/exposure; descriptive"
+      },
+      "bootstrap": {
+        "ci95": [
+          0.037400681583573736,
+          0.47287621283751224
+        ],
+        "undefined_draws": 0,
+        "draws": 5000,
+        "seed": 20261007,
+        "point_difference": 0.22130084720521848
+      }
+    },
+    "validation": {
+      "start": "2023-01-01",
+      "end": "2025-01-01",
+      "costs": {
+        "1": {
+          "baseline": {
+            "days": 731,
+            "total_return": 2.4088604727822798,
+            "cagr": 0.8447618595309687,
+            "annualized_volatility": 0.43713519307726534,
+            "sharpe_cash_yield_zero": 1.6175324139434928,
+            "max_drawdown_daily_sampled": -0.2594902253704595,
+            "longest_underwater_days_including_unrecovered": 244,
+            "buy_events": 8,
+            "total_fees_usdt": 344.05607284437104,
+            "total_slippage_usdt": 172.03418759591275,
+            "ending_equity_usdt": 34088.6047278228
+          },
+          "filtered": {
+            "days": 731,
+            "total_return": 2.577441783835129,
+            "cagr": 0.8897643287195154,
+            "annualized_volatility": 0.42878419082852615,
+            "sharpe_cash_yield_zero": 1.6969132128448907,
+            "max_drawdown_daily_sampled": -0.2364201302364367,
+            "longest_underwater_days_including_unrecovered": 242,
+            "buy_events": 4,
+            "total_fees_usdt": 173.0635305066792,
+            "total_slippage_usdt": 86.53827375824208,
+            "ending_equity_usdt": 35774.41783835129
+          },
+          "buy_hold": {
+            "days": 731,
+            "total_return": 4.693931363089438,
+            "cagr": 1.3833587362425956,
+            "annualized_volatility": 0.4866784206533267,
+            "sharpe_cash_yield_zero": 2.026628682923055,
+            "max_drawdown_daily_sampled": -0.2598579104007165,
+            "longest_underwater_days_including_unrecovered": 237,
+            "buy_events": 1,
+            "total_fees_usdt": 66.98631993084521,
+            "total_slippage_usdt": 33.50491991663488,
+            "ending_equity_usdt": 56939.31363089438
+          },
+          "btc_cash": {
+            "days": 731,
+            "total_return": 2.213690880275856,
+            "cagr": 0.7912461177752896,
+            "annualized_volatility": 0.31286550684924197,
+            "sharpe_cash_yield_zero": 2.019518560454586,
+            "max_drawdown_daily_sampled": -0.1637793294149933,
+            "longest_underwater_days_including_unrecovered": 229,
+            "buy_events": 354,
+            "total_fees_usdt": 87.71521879911992,
+            "total_slippage_usdt": 43.863176521354156,
+            "ending_equity_usdt": 32136.90880275856
+          }
+        },
+        "2": {
+          "baseline": {
+            "days": 731,
+            "total_return": 2.3280216263586757,
+            "cagr": 0.8227868945281753,
+            "annualized_volatility": 0.4371816591797788,
+            "sharpe_cash_yield_zero": 1.5899463797439095,
+            "max_drawdown_daily_sampled": -0.26942131810717906,
+            "longest_underwater_days_including_unrecovered": 246,
+            "buy_events": 8,
+            "total_fees_usdt": 678.7173626180661,
+            "total_slippage_usdt": 339.38297962562393,
+            "ending_equity_usdt": 33280.21626358676
+          },
+          "filtered": {
+            "days": 731,
+            "total_return": 2.534768956787485,
+            "cagr": 0.87847508921554,
+            "annualized_volatility": 0.4287673646723178,
+            "sharpe_cash_yield_zero": 1.6829618165898201,
+            "max_drawdown_daily_sampled": -0.2398499512599398,
+            "longest_underwater_days_including_unrecovered": 242,
+            "buy_events": 4,
+            "total_fees_usdt": 343.6558423346667,
+            "total_slippage_usdt": 171.85378436652005,
+            "ending_equity_usdt": 35347.68956787485
+          },
+          "buy_hold": {
+            "days": 731,
+            "total_return": 4.676875136284151,
+            "cagr": 1.3797912551258436,
+            "annualized_volatility": 0.48665528892990295,
+            "sharpe_cash_yield_zero": 2.0236160127898892,
+            "max_drawdown_daily_sampled": -0.2598579104007165,
+            "longest_underwater_days_including_unrecovered": 237,
+            "buy_events": 1,
+            "total_fees_usdt": 133.72511263158492,
+            "total_slippage_usdt": 66.90952570179161,
+            "ending_equity_usdt": 56768.75136284151
+          },
+          "btc_cash": {
+            "days": 731,
+            "total_return": 2.19317872035486,
+            "cagr": 0.785528255957598,
+            "annualized_volatility": 0.31284567164684324,
+            "sharpe_cash_yield_zero": 2.0093918369109147,
+            "max_drawdown_daily_sampled": -0.16484571872839893,
+            "longest_underwater_days_including_unrecovered": 229,
+            "buy_events": 354,
+            "total_fees_usdt": 174.75659835833733,
+            "total_slippage_usdt": 87.40049312345988,
+            "ending_equity_usdt": 31931.7872035486
+          }
+        },
+        "4": {
+          "baseline": {
+            "days": 731,
+            "total_return": 2.1720487903881227,
+            "cagr": 0.7796189255237427,
+            "annualized_volatility": 0.43739471867039065,
+            "sharpe_cash_yield_zero": 1.5344932252972818,
+            "max_drawdown_daily_sampled": -0.2888884949656173,
+            "longest_underwater_days_including_unrecovered": 251,
+            "buy_events": 8,
+            "total_fees_usdt": 1320.7879203473574,
+            "total_slippage_usdt": 660.4887672320458,
+            "ending_equity_usdt": 31720.487903881225
+          },
+          "filtered": {
+            "days": 731,
+            "total_return": 2.45094384004323,
+            "cagr": 0.8560984124894115,
+            "annualized_volatility": 0.42879623059978106,
+            "sharpe_cash_yield_zero": 1.654877287820341,
+            "max_drawdown_daily_sampled": -0.24666630530519107,
+            "longest_underwater_days_including_unrecovered": 242,
+            "buy_events": 4,
+            "total_fees_usdt": 677.5545820546184,
+            "total_slippage_usdt": 338.87939451681655,
+            "ending_equity_usdt": 34509.4384004323
+          },
+          "buy_hold": {
+            "days": 731,
+            "total_return": 4.642915628152807,
+            "cagr": 1.3726722673109482,
+            "annualized_volatility": 0.486623119833513,
+            "sharpe_cash_yield_zero": 2.017545251089556,
+            "max_drawdown_daily_sampled": -0.2598579104007165,
+            "longest_underwater_days_including_unrecovered": 237,
+            "buy_events": 1,
+            "total_fees_usdt": 266.46375504669743,
+            "total_slippage_usdt": 133.41919368026788,
+            "ending_equity_usdt": 56429.15628152806
+          },
+          "btc_cash": {
+            "days": 731,
+            "total_return": 2.1525387615733833,
+            "cagr": 0.7741451017630547,
+            "annualized_volatility": 0.3128151460780316,
+            "sharpe_cash_yield_zero": 1.9890818641328072,
+            "max_drawdown_daily_sampled": -0.16697419096650512,
+            "longest_underwater_days_including_unrecovered": 229,
+            "buy_events": 354,
+            "total_fees_usdt": 346.836348580798,
+            "total_slippage_usdt": 173.50635721168464,
+            "ending_equity_usdt": 31525.387615733835
+          }
+        }
+      },
+      "rejected_opportunities": {
+        "count": 4,
+        "profitable_missed": 1,
+        "losing_avoided": 3,
+        "baseline_trade_returns": [
+          -0.017437182255248485,
+          0.013573188646506917,
+          -0.022320733674558446,
+          -0.021355846748150387
+        ],
+        "note": "Per-trade percentage outcomes, not additive portfolio PnL attribution"
+      },
+      "natural_completed_episodes": 3,
+      "random_control": {
+        "accepted_episodes": 4,
+        "baseline_episodes": 8,
+        "actual_sharpe": 1.6969132128448903,
+        "p_ge_actual": 0.07096451774112944,
+        "seed": 20261007,
+        "limitation": "Exact episode count, not matched holding duration/exposure; descriptive"
+      },
+      "bootstrap": {
+        "ci95": [
+          -0.19034836318693127,
+          0.3739125666747476
+        ],
+        "undefined_draws": 0,
+        "draws": 5000,
+        "seed": 20261007,
+        "point_difference": 0.07938079890139793
+      }
+    },
+    "historical_test_already_seen": {
+      "start": "2025-01-01",
+      "end": "2026-10-06",
+      "costs": {
+        "1": {
+          "baseline": {
+            "days": 643,
+            "total_return": 0.057020156678458056,
+            "cagr": 0.03197911219600402,
+            "annualized_volatility": 0.27846903561103226,
+            "sharpe_cash_yield_zero": 0.25192223984154544,
+            "max_drawdown_daily_sampled": -0.2978282194881863,
+            "longest_underwater_days_including_unrecovered": 622,
+            "buy_events": 10,
+            "total_fees_usdt": 173.56889374265464,
+            "total_slippage_usdt": 86.78465451009711,
+            "ending_equity_usdt": 10570.20156678458
+          },
+          "filtered": {
+            "days": 643,
+            "total_return": -0.035678026303964216,
+            "cagr": -0.020411612170173954,
+            "annualized_volatility": 0.24691304786151955,
+            "sharpe_cash_yield_zero": 0.040178658786880886,
+            "max_drawdown_daily_sampled": -0.2495775265879142,
+            "longest_underwater_days_including_unrecovered": 364,
+            "buy_events": 3,
+            "total_fees_usdt": 53.63300704934299,
+            "total_slippage_usdt": 26.816434441963246,
+            "ending_equity_usdt": 9643.219736960358
+          },
+          "buy_hold": {
+            "days": 643,
+            "total_return": -0.09275778713091531,
+            "cagr": -0.053759497719433225,
+            "annualized_volatility": 0.4281567643648519,
+            "sharpe_cash_yield_zero": 0.08485599910730099,
+            "max_drawdown_daily_sampled": -0.531020385516745,
+            "longest_underwater_days_including_unrecovered": 364,
+            "buy_events": 1,
+            "total_fees_usdt": 19.071513622333164,
+            "total_slippage_usdt": 9.535532068458828,
+            "ending_equity_usdt": 9072.422128690847
+          },
+          "btc_cash": {
+            "days": 643,
+            "total_return": -0.028542980976582477,
+            "cagr": -0.016303829681740045,
+            "annualized_volatility": 0.2752491351843062,
+            "sharpe_cash_yield_zero": 0.0777116497859076,
+            "max_drawdown_daily_sampled": -0.37531976351936613,
+            "longest_underwater_days_including_unrecovered": 364,
+            "buy_events": 318,
+            "total_fees_usdt": 34.954243117351496,
+            "total_slippage_usdt": 17.47706330904776,
+            "ending_equity_usdt": 9714.570190234175
+          }
+        },
+        "2": {
+          "baseline": {
+            "days": 643,
+            "total_return": 0.02578043606574787,
+            "cagr": 0.014553737113974785,
+            "annualized_volatility": 0.2783880764147714,
+            "sharpe_cash_yield_zero": 0.19074882717223737,
+            "max_drawdown_daily_sampled": -0.3072451553724673,
+            "longest_underwater_days_including_unrecovered": 622,
+            "buy_events": 10,
+            "total_fees_usdt": 341.92090689821964,
+            "total_slippage_usdt": 170.96122413559252,
+            "ending_equity_usdt": 10257.80436065748
+          },
+          "filtered": {
+            "days": 643,
+            "total_return": -0.04431800098129446,
+            "cagr": -0.025403443285466176,
+            "annualized_volatility": 0.24697536789288446,
+            "sharpe_cash_yield_zero": 0.019546086024120665,
+            "max_drawdown_daily_sampled": -0.25294824768433977,
+            "longest_underwater_days_including_unrecovered": 364,
+            "buy_events": 3,
+            "total_fees_usdt": 106.78837889726452,
+            "total_slippage_usdt": 53.39390645090484,
+            "ending_equity_usdt": 9556.819990187056
+          },
+          "buy_hold": {
+            "days": 643,
+            "total_return": -0.09547544000786001,
+            "cagr": -0.05536953413710333,
+            "annualized_volatility": 0.4281677440370307,
+            "sharpe_cash_yield_zero": 0.08088738094987596,
+            "max_drawdown_daily_sampled": -0.5310203855167451,
+            "longest_underwater_days_including_unrecovered": 364,
+            "buy_events": 1,
+            "total_fees_usdt": 38.08682452954061,
+            "total_slippage_usdt": 19.04251463970824,
+            "ending_equity_usdt": 9045.2455999214
+          },
+          "btc_cash": {
+            "days": 643,
+            "total_return": -0.03376792399079276,
+            "cagr": -0.01931064527126236,
+            "annualized_volatility": 0.275256617238444,
+            "sharpe_cash_yield_zero": 0.06659707588365626,
+            "max_drawdown_daily_sampled": -0.37629088715457626,
+            "longest_underwater_days_including_unrecovered": 364,
+            "buy_events": 318,
+            "total_fees_usdt": 69.72440099732286,
+            "total_slippage_usdt": 34.86196740578805,
+            "ending_equity_usdt": 9662.320760092072
+          }
+        },
+        "4": {
+          "baseline": {
+            "days": 643,
+            "total_return": -0.03395677181088852,
+            "cagr": -0.019419453622272154,
+            "annualized_volatility": 0.27849402419936553,
+            "sharpe_cash_yield_zero": 0.06850469196211927,
+            "max_drawdown_daily_sampled": -0.32641080002230105,
+            "longest_underwater_days_including_unrecovered": 622,
+            "buy_events": 10,
+            "total_fees_usdt": 663.5985709969171,
+            "total_slippage_usdt": 331.80190882950484,
+            "ending_equity_usdt": 9660.432281891115
+          },
+          "filtered": {
+            "days": 643,
+            "total_return": -0.06136649950652495,
+            "cagr": -0.035310974090706826,
+            "annualized_volatility": 0.24719104102664638,
+            "sharpe_cash_yield_zero": -0.021587503090348417,
+            "max_drawdown_daily_sampled": -0.26042267438613165,
+            "longest_underwater_days_including_unrecovered": 622,
+            "buy_events": 3,
+            "total_fees_usdt": 211.6837403105631,
+            "total_slippage_usdt": 105.84068559300471,
+            "ending_equity_usdt": 9386.33500493475
+          },
+          "buy_hold": {
+            "days": 643,
+            "total_return": -0.10088637620297236,
+            "cagr": -0.0585814099946802,
+            "annualized_volatility": 0.4282074388897752,
+            "sharpe_cash_yield_zero": 0.07296559812901993,
+            "max_drawdown_daily_sampled": -0.5310203855167451,
+            "longest_underwater_days_including_unrecovered": 364,
+            "buy_events": 1,
+            "total_fees_usdt": 75.94961832558184,
+            "total_slippage_usdt": 37.971229391132894,
+            "ending_equity_usdt": 8991.136237970277
+          },
+          "btc_cash": {
+            "days": 643,
+            "total_return": -0.04413362868899018,
+            "cagr": -0.025296717120799617,
+            "annualized_volatility": 0.27528306714757866,
+            "sharpe_cash_yield_zero": 0.04437974913988396,
+            "max_drawdown_daily_sampled": -0.37822804948164535,
+            "longest_underwater_days_including_unrecovered": 364,
+            "buy_events": 318,
+            "total_fees_usdt": 138.71652502049017,
+            "total_slippage_usdt": 69.35732946051502,
+            "ending_equity_usdt": 9558.663713110098
+          }
+        }
+      },
+      "rejected_opportunities": {
+        "count": 7,
+        "profitable_missed": 1,
+        "losing_avoided": 6,
+        "baseline_trade_returns": [
+          -0.02619361823761046,
+          -0.01768768863805381,
+          -0.021827753386579052,
+          -0.004860930203558711,
+          -0.013670011869254317,
+          -0.032609499238516526,
+          0.2337178057986482
+        ],
+        "note": "Per-trade percentage outcomes, not additive portfolio PnL attribution"
+      },
+      "natural_completed_episodes": 2,
+      "random_control": {
+        "accepted_episodes": 3,
+        "baseline_episodes": 10,
+        "actual_sharpe": 0.04017865878687861,
+        "p_ge_actual": 0.504247876061969,
+        "seed": 20261007,
+        "limitation": "Exact episode count, not matched holding duration/exposure; descriptive"
+      },
+      "bootstrap": {
+        "ci95": [
+          -0.9072475054148231,
+          0.4132611759127418
+        ],
+        "undefined_draws": 0,
+        "draws": 5000,
+        "seed": 20261007,
+        "point_difference": -0.21174358105466456
+      }
+    },
+    "year_2023": {
+      "start": "2023-01-01",
+      "end": "2024-01-01",
+      "costs": {
+        "1": {
+          "baseline": {
+            "days": 365,
+            "total_return": 0.8775208568701527,
+            "cagr": 0.8775208568701527,
+            "annualized_volatility": 0.41980902700914274,
+            "sharpe_cash_yield_zero": 1.7073014583255357,
+            "max_drawdown_daily_sampled": -0.19056664494380193,
+            "longest_underwater_days_including_unrecovered": 102,
+            "buy_events": 3,
+            "total_fees_usdt": 79.37799839941685,
+            "total_slippage_usdt": 39.69122276915187,
+            "ending_equity_usdt": 18775.208568701528
+          },
+          "filtered": {
+            "days": 365,
+            "total_return": 0.910840531478255,
+            "cagr": 0.910840531478255,
+            "annualized_volatility": 0.4194189903915765,
+            "sharpe_cash_yield_zero": 1.7505208337013078,
+            "max_drawdown_daily_sampled": -0.19056664494380193,
+            "longest_underwater_days_including_unrecovered": 101,
+            "buy_events": 2,
+            "total_fees_usdt": 54.637029728697094,
+            "total_slippage_usdt": 27.32081245513567,
+            "ending_equity_usdt": 19108.40531478255
+          },
+          "buy_hold": {
+            "days": 365,
+            "total_return": 1.5619507335498777,
+            "cagr": 1.5619507335498777,
+            "annualized_volatility": 0.45444209915480194,
+            "sharpe_cash_yield_zero": 2.294859556802318,
+            "max_drawdown_daily_sampled": -0.19850006455917535,
+            "longest_underwater_days_including_unrecovered": 101,
+            "buy_events": 1,
+            "total_fees_usdt": 35.63516247799676,
+            "total_slippage_usdt": 17.821499479996127,
+            "ending_equity_usdt": 25619.507335498776
+          },
+          "btc_cash": {
+            "days": 365,
+            "total_return": 0.8699952804249307,
+            "cagr": 0.8699952804249307,
+            "annualized_volatility": 0.29214239451005897,
+            "sharpe_cash_yield_zero": 2.2881259112117345,
+            "max_drawdown_daily_sampled": -0.13110770206271638,
+            "longest_underwater_days_including_unrecovered": 101,
+            "buy_events": 177,
+            "total_fees_usdt": 37.33470971301044,
+            "total_slippage_usdt": 18.66954384576779,
+            "ending_equity_usdt": 18699.952804249308
+          }
+        },
+        "2": {
+          "baseline": {
+            "days": 365,
+            "total_return": 0.8606989518405044,
+            "cagr": 0.8606989518405044,
+            "annualized_volatility": 0.4199494068310324,
+            "sharpe_cash_yield_zero": 1.6853991815026645,
+            "max_drawdown_daily_sampled": -0.19056664494380204,
+            "longest_underwater_days_including_unrecovered": 103,
+            "buy_events": 3,
+            "total_fees_usdt": 157.98402849807758,
+            "total_slippage_usdt": 79.00085822344077,
+            "ending_equity_usdt": 18606.989518405044
+          },
+          "filtered": {
+            "days": 365,
+            "total_return": 0.8994097947879021,
+            "cagr": 0.8994097947879021,
+            "annualized_volatility": 0.41947953309178143,
+            "sharpe_cash_yield_zero": 1.7359967701641223,
+            "max_drawdown_daily_sampled": -0.19056664494380204,
+            "longest_underwater_days_including_unrecovered": 101,
+            "buy_events": 2,
+            "total_fees_usdt": 108.91064308352954,
+            "total_slippage_usdt": 54.464479014833785,
+            "ending_equity_usdt": 18994.09794787902
+          },
+          "buy_hold": {
+            "days": 365,
+            "total_return": 1.5542763851974084,
+            "cagr": 1.5542763851974084,
+            "annualized_volatility": 0.4544558424545711,
+            "sharpe_cash_yield_zero": 2.2881837079649947,
+            "max_drawdown_daily_sampled": -0.19850006455917524,
+            "longest_underwater_days_including_unrecovered": 101,
+            "buy_events": 1,
+            "total_fees_usdt": 71.14798335128947,
+            "total_slippage_usdt": 35.5896411771224,
+            "ending_equity_usdt": 25542.763851974083
+          },
+          "btc_cash": {
+            "days": 365,
+            "total_return": 0.8627099012737378,
+            "cagr": 0.8627099012737378,
+            "annualized_volatility": 0.29214685041850724,
+            "sharpe_cash_yield_zero": 2.2747116409053456,
+            "max_drawdown_daily_sampled": -0.13129275637597337,
+            "longest_underwater_days_including_unrecovered": 101,
+            "buy_events": 177,
+            "total_fees_usdt": 74.50783014603883,
+            "total_slippage_usdt": 37.262653942515726,
+            "ending_equity_usdt": 18627.099012737377
+          }
+        },
+        "4": {
+          "baseline": {
+            "days": 365,
+            "total_return": 0.8275057731796922,
+            "cagr": 0.8275057731796922,
+            "annualized_volatility": 0.42032304187819286,
+            "sharpe_cash_yield_zero": 1.6413711794261225,
+            "max_drawdown_daily_sampled": -0.19056664494380204,
+            "longest_underwater_days_including_unrecovered": 103,
+            "buy_events": 3,
+            "total_fees_usdt": 312.9095755481183,
+            "total_slippage_usdt": 156.48976560235315,
+            "ending_equity_usdt": 18275.057731796922
+          },
+          "filtered": {
+            "days": 365,
+            "total_return": 0.8767529317140215,
+            "cagr": 0.8767529317140215,
+            "annualized_volatility": 0.4196635677192992,
+            "sharpe_cash_yield_zero": 1.7067690934902042,
+            "max_drawdown_daily_sampled": -0.19056664494380204,
+            "longest_underwater_days_including_unrecovered": 102,
+            "buy_events": 2,
+            "total_fees_usdt": 216.37712164661744,
+            "total_slippage_usdt": 108.22492934878281,
+            "ending_equity_usdt": 18767.529317140215
+          },
+          "buy_hold": {
+            "days": 365,
+            "total_return": 1.5389965054060788,
+            "cagr": 1.5389965054060788,
+            "annualized_volatility": 0.45451283141106064,
+            "sharpe_cash_yield_zero": 2.2747151899314666,
+            "max_drawdown_daily_sampled": -0.19850006455917535,
+            "longest_underwater_days_including_unrecovered": 101,
+            "buy_events": 1,
+            "total_fees_usdt": 141.80836859100557,
+            "total_slippage_usdt": 70.96659525557453,
+            "ending_equity_usdt": 25389.965054060787
+          },
+          "btc_cash": {
+            "days": 365,
+            "total_return": 0.8482218045033529,
+            "cagr": 0.8482218045033529,
+            "annualized_volatility": 0.2921747279732807,
+            "sharpe_cash_yield_zero": 2.2477533937686354,
+            "max_drawdown_daily_sampled": -0.13166256436863055,
+            "longest_underwater_days_including_unrecovered": 101,
+            "buy_events": 177,
+            "total_fees_usdt": 148.37195356326217,
+            "total_slippage_usdt": 74.22079602480969,
+            "ending_equity_usdt": 18482.21804503353
+          }
+        }
+      },
+      "rejected_opportunities": {
+        "count": 1,
+        "profitable_missed": 0,
+        "losing_avoided": 1,
+        "baseline_trade_returns": [
+          -0.017437182255248485
+        ],
+        "note": "Per-trade percentage outcomes, not additive portfolio PnL attribution"
+      },
+      "natural_completed_episodes": 1
+    },
+    "year_2024": {
+      "start": "2024-01-01",
+      "end": "2025-01-01",
+      "costs": {
+        "1": {
+          "baseline": {
+            "days": 366,
+            "total_return": 0.810179205691639,
+            "cagr": 0.807246591613977,
+            "annualized_volatility": 0.4541287307568616,
+            "sharpe_cash_yield_zero": 1.5289990179507755,
+            "max_drawdown_daily_sampled": -0.2594902253704595,
+            "longest_underwater_days_including_unrecovered": 244,
+            "buy_events": 6,
+            "total_fees_usdt": 160.51986103732395,
+            "total_slippage_usdt": 80.26201616213625,
+            "ending_equity_usdt": 18101.79205691639
+          },
+          "filtered": {
+            "days": 366,
+            "total_return": 0.8665741486291965,
+            "cagr": 0.8633939707105436,
+            "annualized_volatility": 0.4382891968794106,
+            "sharpe_cash_yield_zero": 1.6380766821931134,
+            "max_drawdown_daily_sampled": -0.2364201302364366,
+            "longest_underwater_days_including_unrecovered": 242,
+            "buy_events": 3,
+            "total_fees_usdt": 81.76051492607913,
+            "total_slippage_usdt": 40.882454559149494,
+            "ending_equity_usdt": 18665.741486291965
+          },
+          "buy_hold": {
+            "days": 366,
+            "total_return": 1.2158408776128944,
+            "cagr": 1.2110291864660603,
+            "annualized_volatility": 0.5172641622511728,
+            "sharpe_cash_yield_zero": 1.7917779333463537,
+            "max_drawdown_daily_sampled": -0.2598579104007165,
+            "longest_underwater_days_including_unrecovered": 237,
+            "buy_events": 1,
+            "total_fees_usdt": 32.17059935550443,
+            "total_slippage_usdt": 16.08835134468159,
+            "ending_equity_usdt": 22158.408776128945
+          },
+          "btc_cash": {
+            "days": 366,
+            "total_return": 0.715244385692734,
+            "cagr": 0.7127176429750637,
+            "annualized_volatility": 0.3325297051131123,
+            "sharpe_cash_yield_zero": 1.7843680750685953,
+            "max_drawdown_daily_sampled": -0.16377932941499296,
+            "longest_underwater_days_including_unrecovered": 229,
+            "buy_events": 178,
+            "total_fees_usdt": 39.734597533714044,
+            "total_slippage_usdt": 19.869101778743698,
+            "ending_equity_usdt": 17152.44385692734
+          }
+        },
+        "2": {
+          "baseline": {
+            "days": 366,
+            "total_return": 0.777887421412037,
+            "cagr": 0.7750944199644019,
+            "annualized_volatility": 0.4538958846736258,
+            "sharpe_cash_yield_zero": 1.4899440898339087,
+            "max_drawdown_daily_sampled": -0.26942131810717895,
+            "longest_underwater_days_including_unrecovered": 246,
+            "buy_events": 6,
+            "total_fees_usdt": 318.06514373904537,
+            "total_slippage_usdt": 159.0408278497021,
+            "ending_equity_usdt": 17778.87421412037
+          },
+          "filtered": {
+            "days": 366,
+            "total_return": 0.8498503221299372,
+            "cagr": 0.8467440487105444,
+            "annualized_volatility": 0.4379998433080774,
+            "sharpe_cash_yield_zero": 1.6183512379157485,
+            "max_drawdown_daily_sampled": -0.2398499512599397,
+            "longest_underwater_days_including_unrecovered": 242,
+            "buy_events": 3,
+            "total_fees_usdt": 162.7294635379646,
+            "total_slippage_usdt": 81.37347437513787,
+            "ending_equity_usdt": 18498.503221299372
+          },
+          "buy_hold": {
+            "days": 366,
+            "total_return": 1.2092033047018491,
+            "cagr": 1.204424096030202,
+            "annualized_volatility": 0.5170448017697548,
+            "sharpe_cash_yield_zero": 1.7865285791762597,
+            "max_drawdown_daily_sampled": -0.2598579104007165,
+            "longest_underwater_days_including_unrecovered": 237,
+            "buy_events": 1,
+            "total_fees_usdt": 64.23269115698969,
+            "total_slippage_usdt": 32.12853397276575,
+            "ending_equity_usdt": 22092.03304701849
+          },
+          "btc_cash": {
+            "days": 366,
+            "total_return": 0.7076656262307652,
+            "cagr": 0.7051706787228285,
+            "annualized_volatility": 0.33238501962539785,
+            "sharpe_cash_yield_zero": 1.7716993560442855,
+            "max_drawdown_daily_sampled": -0.16484571872839915,
+            "longest_underwater_days_including_unrecovered": 229,
+            "buy_events": 178,
+            "total_fees_usdt": 79.27681675559019,
+            "total_slippage_usdt": 39.64560395647635,
+            "ending_equity_usdt": 17076.656262307653
+          }
+        },
+        "4": {
+          "baseline": {
+            "days": 366,
+            "total_return": 0.7150214117811982,
+            "cagr": 0.7124956058099636,
+            "annualized_volatility": 0.4536062152879176,
+            "sharpe_cash_yield_zero": 1.4113454336853992,
+            "max_drawdown_daily_sampled": -0.28888849496561697,
+            "longest_underwater_days_including_unrecovered": 251,
+            "buy_events": 6,
+            "total_fees_usdt": 624.4485717489764,
+            "total_slippage_usdt": 312.25663355178017,
+            "ending_equity_usdt": 17150.214117811982
+          },
+          "filtered": {
+            "days": 366,
+            "total_return": 0.8168506731660448,
+            "cagr": 0.8138890189295818,
+            "annualized_volatility": 0.43751600375187966,
+            "sharpe_cash_yield_zero": 1.578573666091478,
+            "max_drawdown_daily_sampled": -0.24666630530519074,
+            "longest_underwater_days_including_unrecovered": 242,
+            "buy_events": 3,
+            "total_fees_usdt": 322.32264048061325,
+            "total_slippage_usdt": 161.1959283415074,
+            "ending_equity_usdt": 18168.506731660447
+          },
+          "buy_hold": {
+            "days": 366,
+            "total_return": 1.1959876788885744,
+            "cagr": 1.1912729822794397,
+            "annualized_volatility": 0.5166350269276531,
+            "sharpe_cash_yield_zero": 1.7759442425503902,
+            "max_drawdown_daily_sampled": -0.2598579104007165,
+            "longest_underwater_days_including_unrecovered": 237,
+            "buy_events": 1,
+            "total_fees_usdt": 128.03291371078453,
+            "total_slippage_usdt": 64.0650647544609,
+            "ending_equity_usdt": 21959.876788885744
+          },
+          "btc_cash": {
+            "days": 366,
+            "total_return": 0.6926065313739225,
+            "cagr": 0.6901744893866337,
+            "annualized_volatility": 0.3321135474955014,
+            "sharpe_cash_yield_zero": 1.7462490550993413,
+            "max_drawdown_daily_sampled": -0.16697419096650568,
+            "longest_underwater_days_including_unrecovered": 229,
+            "buy_events": 178,
+            "total_fees_usdt": 157.78771581510452,
+            "total_slippage_usdt": 78.9225090097062,
+            "ending_equity_usdt": 16926.065313739226
+          }
+        }
+      },
+      "rejected_opportunities": {
+        "count": 3,
+        "profitable_missed": 1,
+        "losing_avoided": 2,
+        "baseline_trade_returns": [
+          0.01357318864650714,
+          -0.022320733674558557,
+          -0.021355846748150498
+        ],
+        "note": "Per-trade percentage outcomes, not additive portfolio PnL attribution"
+      },
+      "natural_completed_episodes": 1
+    },
+    "year_2025": {
+      "start": "2025-01-01",
+      "end": "2026-01-01",
+      "costs": {
+        "1": {
+          "baseline": {
+            "days": 365,
+            "total_return": -0.14322371638772347,
+            "cagr": -0.14322371638772347,
+            "annualized_volatility": 0.3362682593243834,
+            "sharpe_cash_yield_zero": -0.29133988795136234,
+            "max_drawdown_daily_sampled": -0.2978282194881863,
+            "longest_underwater_days_including_unrecovered": 344,
+            "buy_events": 9,
+            "total_fees_usdt": 154.42890776103064,
+            "total_slippage_usdt": 77.21415373198234,
+            "ending_equity_usdt": 8567.762836122765
+          },
+          "filtered": {
+            "days": 365,
+            "total_return": -0.035678026303964216,
+            "cagr": -0.035678026303964216,
+            "annualized_volatility": 0.32791412917053253,
+            "sharpe_cash_yield_zero": 0.05329634838737412,
+            "max_drawdown_daily_sampled": -0.2495775265879142,
+            "longest_underwater_days_including_unrecovered": 257,
+            "buy_events": 3,
+            "total_fees_usdt": 53.63300704934299,
+            "total_slippage_usdt": 26.816434441963246,
+            "ending_equity_usdt": 9643.219736960358
+          },
+          "buy_hold": {
+            "days": 365,
+            "total_return": -0.07261484093384352,
+            "cagr": -0.07261484093384352,
+            "annualized_volatility": 0.4166168528059526,
+            "sharpe_cash_yield_zero": 0.026907125383241064,
+            "max_drawdown_daily_sampled": -0.3215429220583065,
+            "longest_underwater_days_including_unrecovered": 118,
+            "buy_events": 1,
+            "total_fees_usdt": 19.273144715396946,
+            "total_slippage_usdt": 9.636398047981094,
+            "ending_equity_usdt": 9273.851590661565
+          },
+          "btc_cash": {
+            "days": 365,
+            "total_return": -0.03004636260856297,
+            "cagr": -0.03004636260856297,
+            "annualized_volatility": 0.26783399233677285,
+            "sharpe_cash_yield_zero": 0.01966342533376652,
+            "max_drawdown_daily_sampled": -0.21822136430093786,
+            "longest_underwater_days_including_unrecovered": 116,
+            "buy_events": 180,
+            "total_fees_usdt": 26.157500286771263,
+            "total_slippage_usdt": 13.078684836524165,
+            "ending_equity_usdt": 9699.53637391437
+          }
+        },
+        "2": {
+          "baseline": {
+            "days": 365,
+            "total_return": -0.16604721227891384,
+            "cagr": -0.16604721227891384,
+            "annualized_volatility": 0.3363431434458519,
+            "sharpe_cash_yield_zero": -0.3714432161925753,
+            "max_drawdown_daily_sampled": -0.3072451553724673,
+            "longest_underwater_days_including_unrecovered": 344,
+            "buy_events": 9,
+            "total_fees_usdt": 304.71842050660365,
+            "total_slippage_usdt": 152.35800685759696,
+            "ending_equity_usdt": 8339.527877210861
+          },
+          "filtered": {
+            "days": 365,
+            "total_return": -0.04431800098129446,
+            "cagr": -0.04431800098129446,
+            "annualized_volatility": 0.3279973159660027,
+            "sharpe_cash_yield_zero": 0.025927537164413976,
+            "max_drawdown_daily_sampled": -0.25294824768433977,
+            "longest_underwater_days_including_unrecovered": 257,
+            "buy_events": 3,
+            "total_fees_usdt": 106.78837889726452,
+            "total_slippage_usdt": 53.39390645090484,
+            "ending_equity_usdt": 9556.819990187056
+          },
+          "buy_hold": {
+            "days": 365,
+            "total_return": -0.07539283220213078,
+            "cagr": -0.07539283220213078,
+            "annualized_volatility": 0.4166234863421102,
+            "sharpe_cash_yield_zero": 0.01971266172150348,
+            "max_drawdown_daily_sampled": -0.3215429220583065,
+            "longest_underwater_days_including_unrecovered": 118,
+            "buy_events": 1,
+            "total_fees_usdt": 38.4892815997957,
+            "total_slippage_usdt": 19.243944604800568,
+            "ending_equity_usdt": 9246.071677978693
+          },
+          "btc_cash": {
+            "days": 365,
+            "total_return": -0.03379330010374726,
+            "cagr": -0.03379330010374726,
+            "annualized_volatility": 0.2678421437291921,
+            "sharpe_cash_yield_zero": 0.005222212886741322,
+            "max_drawdown_daily_sampled": -0.21845612091956546,
+            "longest_underwater_days_including_unrecovered": 116,
+            "buy_events": 180,
+            "total_fees_usdt": 52.21405922130955,
+            "total_slippage_usdt": 26.106769998481294,
+            "ending_equity_usdt": 9662.066998962528
+          }
+        },
+        "4": {
+          "baseline": {
+            "days": 365,
+            "total_return": -0.2098866522721765,
+            "cagr": -0.2098866522721765,
+            "annualized_volatility": 0.3368346048141733,
+            "sharpe_cash_yield_zero": -0.5306445760324952,
+            "max_drawdown_daily_sampled": -0.32641080002230105,
+            "longest_underwater_days_including_unrecovered": 344,
+            "buy_events": 9,
+            "total_fees_usdt": 593.3230347707863,
+            "total_slippage_usdt": 296.656681838169,
+            "ending_equity_usdt": 7901.133477278235
+          },
+          "filtered": {
+            "days": 365,
+            "total_return": -0.06136649950652495,
+            "cagr": -0.06136649950652495,
+            "annualized_volatility": 0.32828371333116707,
+            "sharpe_cash_yield_zero": -0.028635443284364712,
+            "max_drawdown_daily_sampled": -0.26042267438613165,
+            "longest_underwater_days_including_unrecovered": 344,
+            "buy_events": 3,
+            "total_fees_usdt": 211.6837403105631,
+            "total_slippage_usdt": 105.84068559300471,
+            "ending_equity_usdt": 9386.33500493475
+          },
+          "buy_hold": {
+            "days": 365,
+            "total_return": -0.08092390411745987,
+            "cagr": -0.08092390411745987,
+            "annualized_volatility": 0.41666896897624006,
+            "sharpe_cash_yield_zero": 0.005356378142757397,
+            "max_drawdown_daily_sampled": -0.3215429220583065,
+            "longest_underwater_days_including_unrecovered": 118,
+            "buy_events": 1,
+            "total_fees_usdt": 76.75132403182732,
+            "total_slippage_usdt": 38.37288555658746,
+            "ending_equity_usdt": 9190.760958825402
+          },
+          "btc_cash": {
+            "days": 365,
+            "total_return": -0.04124376696342347,
+            "cagr": -0.04124376696342347,
+            "annualized_volatility": 0.26787912301640254,
+            "sharpe_cash_yield_zero": -0.023634453311097245,
+            "max_drawdown_daily_sampled": -0.21892507737771505,
+            "longest_underwater_days_including_unrecovered": 116,
+            "buy_events": 180,
+            "total_fees_usdt": 104.02598998654217,
+            "total_slippage_usdt": 52.01196939443024,
+            "ending_equity_usdt": 9587.562330365765
+          }
+        }
+      },
+      "rejected_opportunities": {
+        "count": 6,
+        "profitable_missed": 0,
+        "losing_avoided": 6,
+        "baseline_trade_returns": [
+          -0.02619361823761046,
+          -0.01768768863805381,
+          -0.021827753386579052,
+          -0.004860930203558711,
+          -0.013670011869254317,
+          -0.032609499238516526
+        ],
+        "note": "Per-trade percentage outcomes, not additive portfolio PnL attribution"
+      },
+      "natural_completed_episodes": 2
+    },
+    "year_2026_partial": {
+      "start": "2026-01-01",
+      "end": "2026-10-06",
+      "costs": {
+        "1": {
+          "baseline": {
+            "days": 278,
+            "total_return": 0.2337178057986482,
+            "cagr": 0.3175338893132553,
+            "annualized_volatility": 0.1757780967194507,
+            "sharpe_cash_yield_zero": 1.6548524759944168,
+            "max_drawdown_daily_sampled": -0.06421976653442762,
+            "longest_underwater_days_including_unrecovered": 14,
+            "buy_events": 1,
+            "total_fees_usdt": 22.339537575582042,
+            "total_slippage_usdt": 11.170361459778437,
+            "ending_equity_usdt": 12337.178057986483
+          },
+          "filtered": {
+            "days": 278,
+            "total_return": 0.0,
+            "cagr": 0.0,
+            "annualized_volatility": 0.0,
+            "sharpe_cash_yield_zero": 0.0,
+            "max_drawdown_daily_sampled": 0.0,
+            "longest_underwater_days_including_unrecovered": 0,
+            "buy_events": 0,
+            "total_fees_usdt": 0,
+            "total_slippage_usdt": 0,
+            "ending_equity_usdt": 10000.0
+          },
+          "buy_hold": {
+            "days": 278,
+            "total_return": -0.02465059396320779,
+            "cagr": -0.032239438145111654,
+            "annualized_volatility": 0.44358300787795285,
+            "sharpe_cash_yield_zero": 0.14735981549352334,
+            "max_drawdown_daily_sampled": -0.3939873386618784,
+            "longest_underwater_days_including_unrecovered": 264,
+            "buy_events": 1,
+            "total_fees_usdt": 19.753267307695598,
+            "total_slippage_usdt": 9.87657943482418,
+            "ending_equity_usdt": 9753.494060367922
+          },
+          "btc_cash": {
+            "days": 278,
+            "total_return": -0.00037628980638715337,
+            "cagr": -0.0004940204738537179,
+            "annualized_volatility": 0.28516200444825546,
+            "sharpe_cash_yield_zero": 0.14036837546848074,
+            "max_drawdown_daily_sampled": -0.2669146763301051,
+            "longest_underwater_days_including_unrecovered": 264,
+            "buy_events": 138,
+            "total_fees_usdt": 21.873537321583022,
+            "total_slippage_usdt": 10.936775922644522,
+            "ending_equity_usdt": 9996.237101936129
+          }
+        },
+        "2": {
+          "baseline": {
+            "days": 278,
+            "total_return": 0.23002219210617714,
+            "cagr": 0.31235452038339084,
+            "annualized_volatility": 0.1752101870977363,
+            "sharpe_cash_yield_zero": 1.6371915297704878,
+            "max_drawdown_daily_sampled": -0.06421976653442774,
+            "longest_underwater_days_including_unrecovered": 14,
+            "buy_events": 1,
+            "total_fees_usdt": 44.609823169100466,
+            "total_slippage_usdt": 22.307278723573695,
+            "ending_equity_usdt": 12300.221921061771
+          },
+          "filtered": {
+            "days": 278,
+            "total_return": 0.0,
+            "cagr": 0.0,
+            "annualized_volatility": 0.0,
+            "sharpe_cash_yield_zero": 0.0,
+            "max_drawdown_daily_sampled": 0.0,
+            "longest_underwater_days_including_unrecovered": 0,
+            "buy_events": 0,
+            "total_fees_usdt": 0,
+            "total_slippage_usdt": 0,
+            "ending_equity_usdt": 10000.0
+          },
+          "buy_hold": {
+            "days": 278,
+            "total_return": -0.02757226260003176,
+            "cagr": -0.03604381010569335,
+            "annualized_volatility": 0.44359039184861027,
+            "sharpe_cash_yield_zero": 0.1384846106309096,
+            "max_drawdown_daily_sampled": -0.3939873386618785,
+            "longest_underwater_days_including_unrecovered": 264,
+            "buy_events": 1,
+            "total_fees_usdt": 39.44760964793396,
+            "total_slippage_usdt": 19.723588272538105,
+            "ending_equity_usdt": 9724.277373999683
+          },
+          "btc_cash": {
+            "days": 278,
+            "total_return": -0.003816660002751826,
+            "cagr": -0.005008087083202439,
+            "annualized_volatility": 0.2851629268264666,
+            "sharpe_cash_yield_zero": 0.1244968745611165,
+            "max_drawdown_daily_sampled": -0.26766412516685467,
+            "longest_underwater_days_including_unrecovered": 264,
+            "buy_events": 138,
+            "total_fees_usdt": 43.6719455517703,
+            "total_slippage_usdt": 21.836000117229847,
+            "ending_equity_usdt": 9961.833399972482
+          }
+        },
+        "4": {
+          "baseline": {
+            "days": 278,
+            "total_return": 0.22266410378614698,
+            "cagr": 0.30205673061940286,
+            "annualized_volatility": 0.1741795533585742,
+            "sharpe_cash_yield_zero": 1.6006626105033817,
+            "max_drawdown_daily_sampled": -0.06421976653442762,
+            "longest_underwater_days_including_unrecovered": 14,
+            "buy_events": 1,
+            "total_fees_usdt": 88.94361350586775,
+            "total_slippage_usdt": 44.48124701652633,
+            "ending_equity_usdt": 12226.64103786147
+          },
+          "filtered": {
+            "days": 278,
+            "total_return": 0.0,
+            "cagr": 0.0,
+            "annualized_volatility": 0.0,
+            "sharpe_cash_yield_zero": 0.0,
+            "max_drawdown_daily_sampled": 0.0,
+            "longest_underwater_days_including_unrecovered": 0,
+            "buy_events": 0,
+            "total_fees_usdt": 0,
+            "total_slippage_usdt": 0,
+            "ending_equity_usdt": 10000.0
+          },
+          "buy_hold": {
+            "days": 278,
+            "total_return": -0.03338940087815012,
+            "cagr": -0.043607786173933016,
+            "annualized_volatility": 0.443644953819644,
+            "sharpe_cash_yield_zero": 0.1207642614983419,
+            "max_drawdown_daily_sampled": -0.3939873386618784,
+            "longest_underwater_days_including_unrecovered": 264,
+            "buy_events": 1,
+            "total_fees_usdt": 78.66034022617711,
+            "total_slippage_usdt": 39.32930649564038,
+            "ending_equity_usdt": 9666.1059912185
+          },
+          "btc_cash": {
+            "days": 278,
+            "total_return": -0.010661933444880534,
+            "cagr": -0.013975170226556033,
+            "annualized_volatility": 0.28519028239407984,
+            "sharpe_cash_yield_zero": 0.09277188569302139,
+            "max_drawdown_daily_sampled": -0.2691603049703013,
+            "longest_underwater_days_including_unrecovered": 264,
+            "buy_events": 138,
+            "total_fees_usdt": 87.04447835146478,
+            "total_slippage_usdt": 43.522334965647914,
+            "ending_equity_usdt": 9893.380665551194
+          }
+        }
+      },
+      "rejected_opportunities": {
+        "count": 1,
+        "profitable_missed": 1,
+        "losing_avoided": 0,
+        "baseline_trade_returns": [
+          0.2337178057986482
+        ],
+        "note": "Per-trade percentage outcomes, not additive portfolio PnL attribution"
+      },
+      "natural_completed_episodes": 0
+    }
+  },
+  "data_quality": {
+    "daily": {
+      "rows": 3337,
+      "expected_rows": 3337,
+      "missing": [],
+      "unexpected": [],
+      "malformed": [],
+      "duplicates": 0,
+      "shortened_bars": [
+        {
+          "open": "2018-02-08T00:00:00+00:00",
+          "source_close": "2018-02-08T00:28:14.788000+00:00",
+          "nominal_close": "2018-02-08T23:59:59.999000+00:00"
+        }
+      ]
+    },
+    "hourly": {
+      "rows": 79958,
+      "expected_rows": 80090,
+      "missing": [
+        "2017-08-17T00:00:00+00:00",
+        "2017-08-17T01:00:00+00:00",
+        "2017-08-17T02:00:00+00:00",
+        "2017-08-17T03:00:00+00:00",
+        "2017-09-06T17:00:00+00:00",
+        "2017-09-06T18:00:00+00:00",
+        "2017-09-06T19:00:00+00:00",
+        "2017-09-06T20:00:00+00:00",
+        "2017-09-06T21:00:00+00:00",
+        "2017-09-06T22:00:00+00:00",
+        "2018-01-04T04:00:00+00:00",
+        "2018-02-08T01:00:00+00:00",
+        "2018-02-08T02:00:00+00:00",
+        "2018-02-08T03:00:00+00:00",
+        "2018-02-08T04:00:00+00:00",
+        "2018-02-08T05:00:00+00:00",
+        "2018-02-08T06:00:00+00:00",
+        "2018-02-08T07:00:00+00:00",
+        "2018-02-08T08:00:00+00:00",
+        "2018-02-08T09:00:00+00:00",
+        "2018-02-08T10:00:00+00:00",
+        "2018-02-08T11:00:00+00:00",
+        "2018-02-08T12:00:00+00:00",
+        "2018-02-08T13:00:00+00:00",
+        "2018-02-08T14:00:00+00:00",
+        "2018-02-08T15:00:00+00:00",
+        "2018-02-08T16:00:00+00:00",
+        "2018-02-08T17:00:00+00:00",
+        "2018-02-08T18:00:00+00:00",
+        "2018-02-08T19:00:00+00:00",
+        "2018-02-08T20:00:00+00:00",
+        "2018-02-08T21:00:00+00:00",
+        "2018-02-08T22:00:00+00:00",
+        "2018-02-08T23:00:00+00:00",
+        "2018-02-09T00:00:00+00:00",
+        "2018-02-09T01:00:00+00:00",
+        "2018-02-09T02:00:00+00:00",
+        "2018-02-09T03:00:00+00:00",
+        "2018-02-09T04:00:00+00:00",
+        "2018-02-09T05:00:00+00:00",
+        "2018-02-09T06:00:00+00:00",
+        "2018-02-09T07:00:00+00:00",
+        "2018-02-09T08:00:00+00:00",
+        "2018-02-09T09:00:00+00:00",
+        "2018-06-26T02:00:00+00:00",
+        "2018-06-26T03:00:00+00:00",
+        "2018-06-26T04:00:00+00:00",
+        "2018-06-26T05:00:00+00:00",
+        "2018-06-26T06:00:00+00:00",
+        "2018-06-26T07:00:00+00:00",
+        "2018-06-26T08:00:00+00:00",
+        "2018-06-26T09:00:00+00:00",
+        "2018-06-26T10:00:00+00:00",
+        "2018-06-26T11:00:00+00:00",
+        "2018-06-27T13:00:00+00:00",
+        "2018-07-04T01:00:00+00:00",
+        "2018-07-04T02:00:00+00:00",
+        "2018-07-04T03:00:00+00:00",
+        "2018-07-04T04:00:00+00:00",
+        "2018-07-04T05:00:00+00:00",
+        "2018-07-04T06:00:00+00:00",
+        "2018-07-04T07:00:00+00:00",
+        "2018-10-19T06:00:00+00:00",
+        "2018-10-19T07:00:00+00:00",
+        "2018-10-19T08:00:00+00:00",
+        "2018-11-14T02:00:00+00:00",
+        "2018-11-14T03:00:00+00:00",
+        "2018-11-14T04:00:00+00:00",
+        "2018-11-14T05:00:00+00:00",
+        "2018-11-14T06:00:00+00:00",
+        "2018-11-14T07:00:00+00:00",
+        "2018-11-14T08:00:00+00:00",
+        "2019-03-12T02:00:00+00:00",
+        "2019-03-12T03:00:00+00:00",
+        "2019-03-12T04:00:00+00:00",
+        "2019-03-12T05:00:00+00:00",
+        "2019-03-12T06:00:00+00:00",
+        "2019-03-12T07:00:00+00:00",
+        "2019-05-15T03:00:00+00:00",
+        "2019-05-15T04:00:00+00:00",
+        "2019-05-15T05:00:00+00:00",
+        "2019-05-15T06:00:00+00:00",
+        "2019-05-15T07:00:00+00:00",
+        "2019-05-15T08:00:00+00:00",
+        "2019-05-15T09:00:00+00:00",
+        "2019-05-15T10:00:00+00:00",
+        "2019-05-15T11:00:00+00:00",
+        "2019-05-15T12:00:00+00:00",
+        "2019-08-15T02:00:00+00:00",
+        "2019-08-15T03:00:00+00:00",
+        "2019-08-15T04:00:00+00:00",
+        "2019-08-15T05:00:00+00:00",
+        "2019-08-15T06:00:00+00:00",
+        "2019-08-15T07:00:00+00:00",
+        "2019-08-15T08:00:00+00:00",
+        "2019-08-15T09:00:00+00:00",
+        "2019-11-13T02:00:00+00:00",
+        "2019-11-13T03:00:00+00:00",
+        "2019-11-25T02:00:00+00:00",
+        "2019-11-25T03:00:00+00:00",
+        "2020-02-09T02:00:00+00:00",
+        "2020-02-19T12:00:00+00:00",
+        "2020-02-19T13:00:00+00:00",
+        "2020-02-19T14:00:00+00:00",
+        "2020-02-19T15:00:00+00:00",
+        "2020-02-19T16:00:00+00:00",
+        "2020-03-04T10:00:00+00:00",
+        "2020-04-25T02:00:00+00:00",
+        "2020-04-25T03:00:00+00:00",
+        "2020-06-28T02:00:00+00:00",
+        "2020-06-28T03:00:00+00:00",
+        "2020-06-28T04:00:00+00:00",
+        "2020-11-30T06:00:00+00:00",
+        "2020-12-21T14:00:00+00:00",
+        "2020-12-21T15:00:00+00:00",
+        "2020-12-21T16:00:00+00:00",
+        "2020-12-21T17:00:00+00:00",
+        "2020-12-25T02:00:00+00:00",
+        "2021-02-11T04:00:00+00:00",
+        "2021-03-06T02:00:00+00:00",
+        "2021-04-20T02:00:00+00:00",
+        "2021-04-20T03:00:00+00:00",
+        "2021-04-25T05:00:00+00:00",
+        "2021-04-25T06:00:00+00:00",
+        "2021-04-25T07:00:00+00:00",
+        "2021-08-13T02:00:00+00:00",
+        "2021-08-13T03:00:00+00:00",
+        "2021-08-13T04:00:00+00:00",
+        "2021-08-13T05:00:00+00:00",
+        "2021-09-29T07:00:00+00:00",
+        "2021-09-29T08:00:00+00:00",
+        "2023-03-24T13:00:00+00:00"
+      ],
+      "unexpected": [],
+      "malformed": [],
+      "duplicates": 0,
+      "shortened_bars": [
+        {
+          "open": "2017-09-06T16:00:00+00:00",
+          "source_close": "2017-09-06T16:00:00+00:00",
+          "nominal_close": "2017-09-06T16:59:59.999000+00:00"
+        },
+        {
+          "open": "2017-12-18T12:00:00+00:00",
+          "source_close": "2017-12-18T12:29:13.419000+00:00",
+          "nominal_close": "2017-12-18T12:59:59.999000+00:00"
+        },
+        {
+          "open": "2018-01-04T03:00:00+00:00",
+          "source_close": "2018-01-04T03:00:14.838000+00:00",
+          "nominal_close": "2018-01-04T03:59:59.999000+00:00"
+        },
+        {
+          "open": "2018-02-08T00:00:00+00:00",
+          "source_close": "2018-02-08T00:28:14.788000+00:00",
+          "nominal_close": "2018-02-08T00:59:59.999000+00:00"
+        },
+        {
+          "open": "2018-07-04T00:00:00+00:00",
+          "source_close": "2018-07-04T00:22:25.551000+00:00",
+          "nominal_close": "2018-07-04T00:59:59.999000+00:00"
+        },
+        {
+          "open": "2019-06-07T21:00:00+00:00",
+          "source_close": "2019-06-07T21:13:13.524000+00:00",
+          "nominal_close": "2019-06-07T21:59:59.999000+00:00"
+        },
+        {
+          "open": "2020-02-19T11:00:00+00:00",
+          "source_close": "2020-02-19T11:35:32.286000+00:00",
+          "nominal_close": "2020-02-19T11:59:59.999000+00:00"
+        },
+        {
+          "open": "2020-03-04T09:00:00+00:00",
+          "source_close": "2020-03-04T09:21:46.694000+00:00",
+          "nominal_close": "2020-03-04T09:59:59.999000+00:00"
+        },
+        {
+          "open": "2020-12-21T13:00:00+00:00",
+          "source_close": "2020-12-21T13:47:20.521000+00:00",
+          "nominal_close": "2020-12-21T13:59:59.999000+00:00"
+        },
+        {
+          "open": "2021-02-11T03:00:00+00:00",
+          "source_close": "2021-02-11T03:40:54.773000+00:00",
+          "nominal_close": "2021-02-11T03:59:59.999000+00:00"
+        },
+        {
+          "open": "2021-04-25T04:00:00+00:00",
+          "source_close": "2021-04-25T04:00:58.146000+00:00",
+          "nominal_close": "2021-04-25T04:59:59.999000+00:00"
+        },
+        {
+          "open": "2021-08-13T01:00:00+00:00",
+          "source_close": "2021-08-13T01:59:59+00:00",
+          "nominal_close": "2021-08-13T01:59:59.999000+00:00"
+        },
+        {
+          "open": "2021-12-24T04:00:00+00:00",
+          "source_close": "2021-12-24T04:59:54.362000+00:00",
+          "nominal_close": "2021-12-24T04:59:59.999000+00:00"
+        },
+        {
+          "open": "2023-03-24T12:00:00+00:00",
+          "source_close": "2023-03-24T12:39:41.646000+00:00",
+          "nominal_close": "2023-03-24T12:59:59.999000+00:00"
+        }
+      ]
+    },
+    "aggregation": {
+      "checked_days": 3307,
+      "incomplete_days_not_filled": [
+        "2017-08-17T00:00:00+00:00",
+        "2017-09-06T00:00:00+00:00",
+        "2018-01-04T00:00:00+00:00",
+        "2018-02-08T00:00:00+00:00",
+        "2018-02-09T00:00:00+00:00",
+        "2018-06-26T00:00:00+00:00",
+        "2018-06-27T00:00:00+00:00",
+        "2018-07-04T00:00:00+00:00",
+        "2018-10-19T00:00:00+00:00",
+        "2018-11-14T00:00:00+00:00",
+        "2019-03-12T00:00:00+00:00",
+        "2019-05-15T00:00:00+00:00",
+        "2019-08-15T00:00:00+00:00",
+        "2019-11-13T00:00:00+00:00",
+        "2019-11-25T00:00:00+00:00",
+        "2020-02-09T00:00:00+00:00",
+        "2020-02-19T00:00:00+00:00",
+        "2020-03-04T00:00:00+00:00",
+        "2020-04-25T00:00:00+00:00",
+        "2020-06-28T00:00:00+00:00",
+        "2020-11-30T00:00:00+00:00",
+        "2020-12-21T00:00:00+00:00",
+        "2020-12-25T00:00:00+00:00",
+        "2021-02-11T00:00:00+00:00",
+        "2021-03-06T00:00:00+00:00",
+        "2021-04-20T00:00:00+00:00",
+        "2021-04-25T00:00:00+00:00",
+        "2021-08-13T00:00:00+00:00",
+        "2021-09-29T00:00:00+00:00",
+        "2023-03-24T00:00:00+00:00"
+      ],
+      "mismatches": []
+    },
+    "cross_venue": {
+      "note": "BTCUSD vs BTCUSDT; not identical currencies. Diagnostic only; no price substitution.",
+      "unique_coinbase_rows": 3111,
+      "duplicate_boundary_rows": 12,
+      "conflicting_duplicates": [],
+      "malformed_rows": [],
+      "overlap": 3110,
+      "median_absolute_relative_difference": 0.00050954301184436,
+      "p99_absolute_relative_difference": 0.02069234402921354,
+      "over_one_percent": [
+        {
+          "date": "2018-10-09T00:00:00+00:00",
+          "binance_usdt_close": 6656.61,
+          "coinbase_usd_close": 6589.48,
+          "relative_difference": 0.010187450299568468
+        },
+        {
+          "date": "2018-10-10T00:00:00+00:00",
+          "binance_usdt_close": 6631.0,
+          "coinbase_usd_close": 6524.56,
+          "relative_difference": 0.01631374376203132
+        },
+        {
+          "date": "2018-10-11T00:00:00+00:00",
+          "binance_usdt_close": 6252.68,
+          "coinbase_usd_close": 6154.69,
+          "relative_difference": 0.015921191806573587
+        },
+        {
+          "date": "2018-10-12T00:00:00+00:00",
+          "binance_usdt_close": 6298.01,
+          "coinbase_usd_close": 6188.01,
+          "relative_difference": 0.017776312578680287
+        },
+        {
+          "date": "2018-10-13T00:00:00+00:00",
+          "binance_usdt_close": 6332.93,
+          "coinbase_usd_close": 6196,
+          "relative_difference": 0.022099741768883296
+        },
+        {
+          "date": "2018-10-14T00:00:00+00:00",
+          "binance_usdt_close": 6339.34,
+          "coinbase_usd_close": 6183.49,
+          "relative_difference": 0.025204213154707222
+        },
+        {
+          "date": "2018-10-15T00:00:00+00:00",
+          "binance_usdt_close": 6752.5,
+          "coinbase_usd_close": 6440.42,
+          "relative_difference": 0.048456467124814884
+        },
+        {
+          "date": "2018-10-16T00:00:00+00:00",
+          "binance_usdt_close": 6759.27,
+          "coinbase_usd_close": 6457.11,
+          "relative_difference": 0.04679492838127275
+        },
+        {
+          "date": "2018-10-17T00:00:00+00:00",
+          "binance_usdt_close": 6740.89,
+          "coinbase_usd_close": 6443.7,
+          "relative_difference": 0.046121017427875444
+        },
+        {
+          "date": "2018-10-18T00:00:00+00:00",
+          "binance_usdt_close": 6618.96,
+          "coinbase_usd_close": 6394.96,
+          "relative_difference": 0.03502758422257535
+        },
+        {
+          "date": "2018-10-19T00:00:00+00:00",
+          "binance_usdt_close": 6528.88,
+          "coinbase_usd_close": 6382.99,
+          "relative_difference": 0.02285605962096149
+        },
+        {
+          "date": "2018-10-20T00:00:00+00:00",
+          "binance_usdt_close": 6588.4,
+          "coinbase_usd_close": 6414,
+          "relative_difference": 0.027190520735890233
+        },
+        {
+          "date": "2018-10-21T00:00:00+00:00",
+          "binance_usdt_close": 6590.11,
+          "coinbase_usd_close": 6415.88,
+          "relative_difference": 0.027156056534723083
+        },
+        {
+          "date": "2018-10-22T00:00:00+00:00",
+          "binance_usdt_close": 6581.2,
+          "coinbase_usd_close": 6407.65,
+          "relative_difference": 0.027084812684837756
+        },
+        {
+          "date": "2018-10-23T00:00:00+00:00",
+          "binance_usdt_close": 6553.51,
+          "coinbase_usd_close": 6395.14,
+          "relative_difference": 0.02476411775191778
+        },
+        {
+          "date": "2018-10-24T00:00:00+00:00",
+          "binance_usdt_close": 6565.5,
+          "coinbase_usd_close": 6415.98,
+          "relative_difference": 0.023304312045860476
+        },
+        {
+          "date": "2018-10-25T00:00:00+00:00",
+          "binance_usdt_close": 6528.09,
+          "coinbase_usd_close": 6395.58,
+          "relative_difference": 0.02071899655699716
+        },
+        {
+          "date": "2018-10-26T00:00:00+00:00",
+          "binance_usdt_close": 6538.63,
+          "coinbase_usd_close": 6404.87,
+          "relative_difference": 0.02088410849868927
+        },
+        {
+          "date": "2018-10-27T00:00:00+00:00",
+          "binance_usdt_close": 6505.6,
+          "coinbase_usd_close": 6409.12,
+          "relative_difference": 0.015053548693112484
+        },
+        {
+          "date": "2018-10-28T00:00:00+00:00",
+          "binance_usdt_close": 6489.93,
+          "coinbase_usd_close": 6403.62,
+          "relative_difference": 0.013478313828740651
+        },
+        {
+          "date": "2018-10-29T00:00:00+00:00",
+          "binance_usdt_close": 6344.5,
+          "coinbase_usd_close": 6266,
+          "relative_difference": 0.012527928503032193
+        },
+        {
+          "date": "2018-10-30T00:00:00+00:00",
+          "binance_usdt_close": 6330.87,
+          "coinbase_usd_close": 6267.63,
+          "relative_difference": 0.010089938302037638
+        },
+        {
+          "date": "2018-10-31T00:00:00+00:00",
+          "binance_usdt_close": 6371.93,
+          "coinbase_usd_close": 6304.18,
+          "relative_difference": 0.010746837812372068
+        },
+        {
+          "date": "2018-11-01T00:00:00+00:00",
+          "binance_usdt_close": 6410.0,
+          "coinbase_usd_close": 6344,
+          "relative_difference": 0.010403530895334079
+        },
+        {
+          "date": "2018-11-02T00:00:00+00:00",
+          "binance_usdt_close": 6433.98,
+          "coinbase_usd_close": 6349.8,
+          "relative_difference": 0.013257110460171972
+        },
+        {
+          "date": "2018-11-05T00:00:00+00:00",
+          "binance_usdt_close": 6468.99,
+          "coinbase_usd_close": 6404,
+          "relative_difference": 0.010148344784509655
+        },
+        {
+          "date": "2018-11-06T00:00:00+00:00",
+          "binance_usdt_close": 6519.11,
+          "coinbase_usd_close": 6448.5,
+          "relative_difference": 0.01094983329456456
+        },
+        {
+          "date": "2018-11-07T00:00:00+00:00",
+          "binance_usdt_close": 6578.46,
+          "coinbase_usd_close": 6503.12,
+          "relative_difference": 0.011585208330770591
+        },
+        {
+          "date": "2018-11-08T00:00:00+00:00",
+          "binance_usdt_close": 6479.84,
+          "coinbase_usd_close": 6406.24,
+          "relative_difference": 0.011488798421539048
+        },
+        {
+          "date": "2018-11-09T00:00:00+00:00",
+          "binance_usdt_close": 6419.99,
+          "coinbase_usd_close": 6334.89,
+          "relative_difference": 0.013433540282467238
+        },
+        {
+          "date": "2018-11-10T00:00:00+00:00",
+          "binance_usdt_close": 6433.05,
+          "coinbase_usd_close": 6347.42,
+          "relative_difference": 0.013490520557958963
+        },
+        {
+          "date": "2018-11-11T00:00:00+00:00",
+          "binance_usdt_close": 6449.81,
+          "coinbase_usd_close": 6357.6,
+          "relative_difference": 0.014503900843085393
+        },
+        {
+          "date": "2018-11-12T00:00:00+00:00",
+          "binance_usdt_close": 6453.07,
+          "coinbase_usd_close": 6327.87,
+          "relative_difference": 0.019785488639937343
+        },
+        {
+          "date": "2018-11-13T00:00:00+00:00",
+          "binance_usdt_close": 6457.66,
+          "coinbase_usd_close": 6259.34,
+          "relative_difference": 0.03168385165209098
+        },
+        {
+          "date": "2018-11-14T00:00:00+00:00",
+          "binance_usdt_close": 5922.41,
+          "coinbase_usd_close": 5605.46,
+          "relative_difference": 0.0565430847780557
+        },
+        {
+          "date": "2018-11-15T00:00:00+00:00",
+          "binance_usdt_close": 5753.4,
+          "coinbase_usd_close": 5579.52,
+          "relative_difference": 0.03116397109428748
+        },
+        {
+          "date": "2018-11-16T00:00:00+00:00",
+          "binance_usdt_close": 5655.94,
+          "coinbase_usd_close": 5512.24,
+          "relative_difference": 0.026069256781272143
+        },
+        {
+          "date": "2018-11-17T00:00:00+00:00",
+          "binance_usdt_close": 5628.29,
+          "coinbase_usd_close": 5504.17,
+          "relative_difference": 0.02255017559414041
+        },
+        {
+          "date": "2018-11-18T00:00:00+00:00",
+          "binance_usdt_close": 5662.0,
+          "coinbase_usd_close": 5560,
+          "relative_difference": 0.01834532374100717
+        },
+        {
+          "date": "2018-11-19T00:00:00+00:00",
+          "binance_usdt_close": 4910.03,
+          "coinbase_usd_close": 4733.5,
+          "relative_difference": 0.03729375726206818
+        },
+        {
+          "date": "2018-11-20T00:00:00+00:00",
+          "binance_usdt_close": 4558.86,
+          "coinbase_usd_close": 4349.23,
+          "relative_difference": 0.04819933643426544
+        },
+        {
+          "date": "2018-11-21T00:00:00+00:00",
+          "binance_usdt_close": 4661.07,
+          "coinbase_usd_close": 4545.11,
+          "relative_difference": 0.02551313389554921
+        },
+        {
+          "date": "2018-11-22T00:00:00+00:00",
+          "binance_usdt_close": 4370.0,
+          "coinbase_usd_close": 4265.36,
+          "relative_difference": 0.024532513082131446
+        },
+        {
+          "date": "2018-11-23T00:00:00+00:00",
+          "binance_usdt_close": 4420.61,
+          "coinbase_usd_close": 4283.8,
+          "relative_difference": 0.0319365983472617
+        },
+        {
+          "date": "2018-11-24T00:00:00+00:00",
+          "binance_usdt_close": 3932.44,
+          "coinbase_usd_close": 3774.99,
+          "relative_difference": 0.04170871975819801
+        },
+        {
+          "date": "2018-11-25T00:00:00+00:00",
+          "binance_usdt_close": 4085.78,
+          "coinbase_usd_close": 3936.69,
+          "relative_difference": 0.03787191777864152
+        },
+        {
+          "date": "2018-11-26T00:00:00+00:00",
+          "binance_usdt_close": 3862.2,
+          "coinbase_usd_close": 3731.32,
+          "relative_difference": 0.0350760588746073
+        },
+        {
+          "date": "2018-11-27T00:00:00+00:00",
+          "binance_usdt_close": 3875.21,
+          "coinbase_usd_close": 3775,
+          "relative_difference": 0.026545695364238453
+        },
+        {
+          "date": "2018-11-29T00:00:00+00:00",
+          "binance_usdt_close": 4295.84,
+          "coinbase_usd_close": 4248,
+          "relative_difference": 0.011261770244821223
+        },
+        {
+          "date": "2018-11-30T00:00:00+00:00",
+          "binance_usdt_close": 4041.32,
+          "coinbase_usd_close": 3976,
+          "relative_difference": 0.01642857142857146
+        },
+        {
+          "date": "2018-12-01T00:00:00+00:00",
+          "binance_usdt_close": 4190.02,
+          "coinbase_usd_close": 4142.01,
+          "relative_difference": 0.011590990847438754
+        },
+        {
+          "date": "2018-12-02T00:00:00+00:00",
+          "binance_usdt_close": 4161.01,
+          "coinbase_usd_close": 4103.19,
+          "relative_difference": 0.014091475169319523
+        },
+        {
+          "date": "2018-12-03T00:00:00+00:00",
+          "binance_usdt_close": 3884.01,
+          "coinbase_usd_close": 3833.47,
+          "relative_difference": 0.013183877792183107
+        },
+        {
+          "date": "2018-12-04T00:00:00+00:00",
+          "binance_usdt_close": 3951.64,
+          "coinbase_usd_close": 3901.84,
+          "relative_difference": 0.01276320915260487
+        },
+        {
+          "date": "2018-12-05T00:00:00+00:00",
+          "binance_usdt_close": 3769.84,
+          "coinbase_usd_close": 3694.39,
+          "relative_difference": 0.020422857359401858
+        },
+        {
+          "date": "2018-12-06T00:00:00+00:00",
+          "binance_usdt_close": 3508.75,
+          "coinbase_usd_close": 3433.26,
+          "relative_difference": 0.021987848284138023
+        },
+        {
+          "date": "2018-12-13T00:00:00+00:00",
+          "binance_usdt_close": 3302.06,
+          "coinbase_usd_close": 3265,
+          "relative_difference": 0.011350689127105573
+        },
+        {
+          "date": "2018-12-16T00:00:00+00:00",
+          "binance_usdt_close": 3228.67,
+          "coinbase_usd_close": 3195,
+          "relative_difference": 0.010538341158059517
+        },
+        {
+          "date": "2018-12-28T00:00:00+00:00",
+          "binance_usdt_close": 3839.26,
+          "coinbase_usd_close": 3888.06,
+          "relative_difference": -0.012551246637140356
+        },
+        {
+          "date": "2019-01-06T00:00:00+00:00",
+          "binance_usdt_close": 3987.6,
+          "coinbase_usd_close": 4040.99,
+          "relative_difference": -0.013212108913904785
+        },
+        {
+          "date": "2019-01-10T00:00:00+00:00",
+          "binance_usdt_close": 3585.88,
+          "coinbase_usd_close": 3626.12,
+          "relative_difference": -0.011097260984192392
+        },
+        {
+          "date": "2019-01-12T00:00:00+00:00",
+          "binance_usdt_close": 3583.13,
+          "coinbase_usd_close": 3619.41,
+          "relative_difference": -0.010023733149877923
+        },
+        {
+          "date": "2019-01-13T00:00:00+00:00",
+          "binance_usdt_close": 3476.81,
+          "coinbase_usd_close": 3514.24,
+          "relative_difference": -0.010650951557093391
+        },
+        {
+          "date": "2019-01-14T00:00:00+00:00",
+          "binance_usdt_close": 3626.09,
+          "coinbase_usd_close": 3664.19,
+          "relative_difference": -0.010397932421626566
+        },
+        {
+          "date": "2019-02-02T00:00:00+00:00",
+          "binance_usdt_close": 3504.77,
+          "coinbase_usd_close": 3468.43,
+          "relative_difference": 0.010477362956726965
+        },
+        {
+          "date": "2019-02-03T00:00:00+00:00",
+          "binance_usdt_close": 3458.11,
+          "coinbase_usd_close": 3414.78,
+          "relative_difference": 0.012688958000222517
+        },
+        {
+          "date": "2019-02-04T00:00:00+00:00",
+          "binance_usdt_close": 3463.22,
+          "coinbase_usd_close": 3409.57,
+          "relative_difference": 0.01573512202418481
+        },
+        {
+          "date": "2019-02-05T00:00:00+00:00",
+          "binance_usdt_close": 3471.59,
+          "coinbase_usd_close": 3428.4,
+          "relative_difference": 0.012597713218994278
+        },
+        {
+          "date": "2019-02-06T00:00:00+00:00",
+          "binance_usdt_close": 3405.37,
+          "coinbase_usd_close": 3367.36,
+          "relative_difference": 0.01128777439893569
+        },
+        {
+          "date": "2019-02-07T00:00:00+00:00",
+          "binance_usdt_close": 3398.4,
+          "coinbase_usd_close": 3359,
+          "relative_difference": 0.01172968145281339
+        },
+        {
+          "date": "2019-02-08T00:00:00+00:00",
+          "binance_usdt_close": 3659.04,
+          "coinbase_usd_close": 3621.99,
+          "relative_difference": 0.010229183404703024
+        },
+        {
+          "date": "2019-02-09T00:00:00+00:00",
+          "binance_usdt_close": 3665.18,
+          "coinbase_usd_close": 3623.73,
+          "relative_difference": 0.011438490174488614
+        },
+        {
+          "date": "2019-02-11T00:00:00+00:00",
+          "binance_usdt_close": 3631.05,
+          "coinbase_usd_close": 3590.36,
+          "relative_difference": 0.01133312536904385
+        },
+        {
+          "date": "2019-02-12T00:00:00+00:00",
+          "binance_usdt_close": 3631.46,
+          "coinbase_usd_close": 3588.06,
+          "relative_difference": 0.012095672870576335
+        },
+        {
+          "date": "2019-02-15T00:00:00+00:00",
+          "binance_usdt_close": 3602.47,
+          "coinbase_usd_close": 3566.59,
+          "relative_difference": 0.010060029327733089
+        },
+        {
+          "date": "2019-02-16T00:00:00+00:00",
+          "binance_usdt_close": 3618.41,
+          "coinbase_usd_close": 3582.37,
+          "relative_difference": 0.01006037902282575
+        },
+        {
+          "date": "2019-02-17T00:00:00+00:00",
+          "binance_usdt_close": 3667.58,
+          "coinbase_usd_close": 3625.08,
+          "relative_difference": 0.01172387919714879
+        },
+        {
+          "date": "2019-02-21T00:00:00+00:00",
+          "binance_usdt_close": 3937.31,
+          "coinbase_usd_close": 3897.71,
+          "relative_difference": 0.010159811786921047
+        },
+        {
+          "date": "2019-04-25T00:00:00+00:00",
+          "binance_usdt_close": 5219.9,
+          "coinbase_usd_close": 5134.81,
+          "relative_difference": 0.01657120711379756
+        },
+        {
+          "date": "2019-04-26T00:00:00+00:00",
+          "binance_usdt_close": 5314.1,
+          "coinbase_usd_close": 5159.51,
+          "relative_difference": 0.029962147568276754
+        },
+        {
+          "date": "2019-04-27T00:00:00+00:00",
+          "binance_usdt_close": 5295.69,
+          "coinbase_usd_close": 5170.6,
+          "relative_difference": 0.024192550187599027
+        },
+        {
+          "date": "2019-04-28T00:00:00+00:00",
+          "binance_usdt_close": 5307.52,
+          "coinbase_usd_close": 5155,
+          "relative_difference": 0.029586808923375507
+        },
+        {
+          "date": "2019-04-29T00:00:00+00:00",
+          "binance_usdt_close": 5238.14,
+          "coinbase_usd_close": 5148.25,
+          "relative_difference": 0.01746030204438398
+        },
+        {
+          "date": "2019-05-01T00:00:00+00:00",
+          "binance_usdt_close": 5383.2,
+          "coinbase_usd_close": 5321.15,
+          "relative_difference": 0.011661013126861741
+        },
+        {
+          "date": "2019-05-02T00:00:00+00:00",
+          "binance_usdt_close": 5492.87,
+          "coinbase_usd_close": 5390.01,
+          "relative_difference": 0.019083452535338497
+        },
+        {
+          "date": "2019-05-03T00:00:00+00:00",
+          "binance_usdt_close": 5772.69,
+          "coinbase_usd_close": 5657.4,
+          "relative_difference": 0.020378619153674782
+        },
+        {
+          "date": "2019-05-04T00:00:00+00:00",
+          "binance_usdt_close": 5829.45,
+          "coinbase_usd_close": 5770.01,
+          "relative_difference": 0.010301541938402048
+        },
+        {
+          "date": "2019-05-05T00:00:00+00:00",
+          "binance_usdt_close": 5775.62,
+          "coinbase_usd_close": 5715.86,
+          "relative_difference": 0.010455119614546149
+        },
+        {
+          "date": "2019-05-06T00:00:00+00:00",
+          "binance_usdt_close": 5747.79,
+          "coinbase_usd_close": 5687.9,
+          "relative_difference": 0.010529369363033947
+        },
+        {
+          "date": "2019-05-07T00:00:00+00:00",
+          "binance_usdt_close": 5846.34,
+          "coinbase_usd_close": 5748.45,
+          "relative_difference": 0.017028938235524427
+        },
+        {
+          "date": "2019-05-11T00:00:00+00:00",
+          "binance_usdt_close": 7076.22,
+          "coinbase_usd_close": 7219.95,
+          "relative_difference": -0.019907340078532343
+        },
+        {
+          "date": "2019-05-26T00:00:00+00:00",
+          "binance_usdt_close": 8614.43,
+          "coinbase_usd_close": 8731.72,
+          "relative_difference": -0.01343263412019613
+        },
+        {
+          "date": "2019-06-26T00:00:00+00:00",
+          "binance_usdt_close": 13093.8,
+          "coinbase_usd_close": 12927.44,
+          "relative_difference": 0.012868750502806447
+        },
+        {
+          "date": "2019-06-27T00:00:00+00:00",
+          "binance_usdt_close": 11329.99,
+          "coinbase_usd_close": 11159.29,
+          "relative_difference": 0.015296672100106656
+        },
+        {
+          "date": "2020-03-12T00:00:00+00:00",
+          "binance_usdt_close": 4800.0,
+          "coinbase_usd_close": 4857.1,
+          "relative_difference": -0.011755986082230163
+        },
+        {
+          "date": "2020-03-13T00:00:00+00:00",
+          "binance_usdt_close": 5578.6,
+          "coinbase_usd_close": 5637.6,
+          "relative_difference": -0.010465446289201097
+        }
+      ]
+    },
+    "execution": {
+      "scheduled_points": 3111,
+      "actual_points": 3111,
+      "unresolved": [],
+      "maintenance_delays": [
+        {
+          "scheduled": "2018-07-04T01:00:00+00:00",
+          "actual": "2018-07-04T08:00:00+00:00",
+          "hours": 7.0
+        }
+      ]
+    },
+    "original_strict_full_hourly_grid_passed": false,
+    "amended_required_input_gate_passed": true
+  }
+}
